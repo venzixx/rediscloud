@@ -7,3 +7,6 @@ target/
 data/
 *.aof
 dependency-reduced-pom.xml
+*.ps1
+*.tmp
+scratch/
