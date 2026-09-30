@@ -31,9 +31,9 @@
             <div class="db-selector">
                 <div class="db-badge">
                     <span class="db-dot"></span>
-                    <span class="db-name">redis://localhost:6379</span>
+                    <span class="db-name" id="sbDbEndpoint">redis://localhost:6379</span>
                 </div>
-                <div class="db-pill">db0</div>
+                <div class="db-pill" id="sbActiveDbPill">db0</div>
             </div>
 
             <!-- Views / Tables Navigation -->
@@ -86,6 +86,11 @@
             <div class="sidebar-section">
                 <span class="section-label">CLOUD &amp; PLATFORM</span>
                 <nav class="nav-tree">
+                    <button class="nav-item" id="navTenantsBtn" data-view-pane="pane-tenants">
+                        <iconify-icon icon="lucide:database" class="nav-icon" width="16" style="color: #60a5fa;"></iconify-icon>
+                        <span class="nav-text">Accounts &amp; Virtual DBs</span>
+                        <span class="nav-count" id="tenantCountBadge">-</span>
+                    </button>
                     <button class="nav-item" id="navCloudApiBtn" data-view-pane="pane-cloud-api">
                         <iconify-icon icon="lucide:shield-check" class="nav-icon" width="16" style="color: #34d399;"></iconify-icon>
                         <span class="nav-text">Cloud API &amp; RLS</span>
@@ -146,12 +151,21 @@
                         Databases
                     </span>
                     <span class="bc-sep">/</span>
-                    <span class="bc-crumb">db0</span>
+                    <div class="vdb-selector-wrapper">
+                        <select id="vdbSelect" class="vdb-select-dropdown" title="Select Virtual Database">
+                            <option value="default">db0 (Default Root)</option>
+                        </select>
+                    </div>
                     <span class="bc-sep">/</span>
                     <span class="bc-crumb active" id="currentViewBreadcrumb">All Records</span>
                 </div>
 
                 <div class="top-bar-actions">
+                    <button class="btn btn-connect btn-sm" id="openConnectModalBtn" title="Prisma, ioredis, Python, CLI connection URLs">
+                        <iconify-icon icon="lucide:link-2" width="14"></iconify-icon>
+                        Connect
+                    </button>
+
                     <div class="live-pill">
                         <label class="switch-sm">
                             <input type="checkbox" id="autoPollCheck" checked>
@@ -532,6 +546,103 @@
                 </div>
             </div>
 
+            <!-- Pane 3: Tenant Accounts & Virtual Databases -->
+            <div class="studio-pane" id="pane-tenants" style="display: none;">
+                <div class="pane-content-scroll">
+                    <!-- Banner -->
+                    <div class="pane-header-banner blue-accent">
+                        <div class="banner-left">
+                            <span class="banner-badge blue">
+                                <iconify-icon icon="lucide:database" width="13"></iconify-icon>
+                                Database Virtualization Active
+                            </span>
+                            <h2 class="banner-title">Multi-Tenant Accounts &amp; Virtualized Databases</h2>
+                            <p class="banner-desc">
+                                Create isolated tenant accounts with dedicated in-memory keyspaces (<code class="inline-code">vdb_&lt;username&gt;</code>). Every tenant gets standard Redis connection URLs, token hash URLs for Prisma and ORMs, and secure REST endpoints with zero keyspace collision.
+                            </p>
+                        </div>
+                        <div class="banner-actions">
+                            <button class="btn btn-primary btn-sm" id="toggleCreateTenantFormBtn">
+                                <iconify-icon icon="lucide:user-plus" width="14"></iconify-icon>
+                                New Tenant Account
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Quick Account Creator Card (collapsible) -->
+                    <div class="tenant-form-card" id="tenantCreationCard" style="display: none;">
+                        <div class="tf-header">
+                            <div class="tf-title-group">
+                                <iconify-icon icon="lucide:user-plus" width="16" style="color: #60a5fa;"></iconify-icon>
+                                <h4>Provision New Tenant &amp; Dedicated Virtual Database</h4>
+                            </div>
+                            <button class="drawer-btn" id="closeTenantFormBtn"><iconify-icon icon="lucide:x" width="16"></iconify-icon></button>
+                        </div>
+                        <form id="createTenantForm" class="tf-body">
+                            <div class="tf-grid">
+                                <div class="studio-form-group">
+                                    <label>Username / Tenant ID *</label>
+                                    <input type="text" id="tenantUsernameInput" class="studio-input" placeholder="e.g. acme_corp or user_alice" required autocomplete="off">
+                                    <small class="hint">Creates isolated database <span id="vdbPreviewName">vdb_...</span></small>
+                                </div>
+                                <div class="studio-form-group">
+                                    <label>Password (Optional - Auto-generated if blank)</label>
+                                    <input type="text" id="tenantPasswordInput" class="studio-input font-mono" placeholder="Leave blank for secure auto-gen pass">
+                                    <small class="hint">Used in standard Redis connection string</small>
+                                </div>
+                                <div class="studio-form-group">
+                                    <label>API Hash Token (Optional - Auto-generated if blank)</label>
+                                    <input type="text" id="tenantTokenInput" class="studio-input font-mono" placeholder="Leave blank for red_api_...">
+                                    <small class="hint">Single-token URL &amp; REST Bearer authorization</small>
+                                </div>
+                            </div>
+                            <div class="tf-actions">
+                                <button type="button" class="btn btn-secondary btn-sm" id="cancelTenantFormBtn">Cancel</button>
+                                <button type="submit" class="btn btn-primary btn-sm" id="submitTenantFormBtn">
+                                    <iconify-icon icon="lucide:plus" width="14"></iconify-icon>
+                                    Provision Account &amp; Virtual Database
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Tenants Stats Ribbon -->
+                    <div class="benchmark-stats-grid" style="margin-bottom: 1.5rem;">
+                        <div class="stat-card">
+                            <span class="stat-lbl">Active Virtual Databases</span>
+                            <span class="stat-val highlight" id="statVdbCount">1</span>
+                            <span class="stat-sub">Isolated memory engines</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-lbl">Registered Accounts</span>
+                            <span class="stat-val" id="statTenantCount">1</span>
+                            <span class="stat-sub">With dedicated credentials</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-lbl">Active Studio Database</span>
+                            <span class="stat-val" id="statActiveTenantName" style="color: #60a5fa;">db0 (default)</span>
+                            <span class="stat-sub">Currently browsed in Studio</span>
+                        </div>
+                    </div>
+
+                    <!-- Tenant Cards Container -->
+                    <div class="section-title-row" style="margin-bottom: 0.75rem;">
+                        <h3 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem;">
+                            <iconify-icon icon="lucide:layers" width="16" style="color: #60a5fa;"></iconify-icon>
+                            Tenant Accounts &amp; Virtual Databases
+                        </h3>
+                        <button class="btn btn-secondary btn-sm" id="refreshTenantsBtn">
+                            <iconify-icon icon="lucide:rotate-cw" width="13"></iconify-icon>
+                            Refresh
+                        </button>
+                    </div>
+
+                    <div class="tenants-cards-grid" id="tenantsCardsContainer">
+                        <!-- Dynamically populated tenant cards -->
+                    </div>
+                </div>
+            </div>
+
             <!-- Bottom Dockable Web CLI Drawer -->
             <div class="terminal-drawer collapsed" id="terminalDrawer">
                 <div class="terminal-drawer-header">
@@ -703,6 +814,109 @@
                     <iconify-icon icon="lucide:check" width="14"></iconify-icon>
                     Save Record
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Connect to Redis Modal -->
+    <div class="modal-backdrop" id="connectModal">
+        <div class="modal-dialog connect-modal-dialog">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 0.65rem;">
+                    <div class="connect-icon-box">
+                        <iconify-icon icon="lucide:link-2" width="20" style="color: #38bdf8;"></iconify-icon>
+                    </div>
+                    <div>
+                        <h3 class="modal-title">Connect to Redis</h3>
+                        <p class="modal-sub">Prisma, ORM, ioredis, Python &amp; Serverless connection hash URLs</p>
+                    </div>
+                </div>
+                <button class="modal-close" id="closeConnectModalBtn">
+                    <iconify-icon icon="lucide:x" width="18"></iconify-icon>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="connect-account-picker">
+                    <label class="lbl-small">Active Tenant / Virtual Database Profile:</label>
+                    <div class="account-select-wrap">
+                        <iconify-icon icon="lucide:user" width="15" class="picker-icon"></iconify-icon>
+                        <select id="connectAccountSelect" class="studio-select" style="width: 100%;">
+                            <!-- Populated with tenant options -->
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Hash URLs Quick Copy Card -->
+                <div class="connect-url-card">
+                    <div class="url-row">
+                        <div class="url-lbl-row">
+                            <span class="url-lbl">Standard Redis URL (User &amp; Pass):</span>
+                            <span class="url-sub">For Prisma, ioredis, Django, Spring Boot</span>
+                        </div>
+                        <div class="url-input-wrap">
+                            <input type="text" id="connRedisUrlInput" readonly class="studio-input font-mono">
+                            <button class="btn btn-secondary btn-sm" id="copyConnRedisUrlBtn" title="Copy URL">
+                                <iconify-icon icon="lucide:copy" width="14"></iconify-icon>
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+                    <div class="url-row">
+                        <div class="url-lbl-row">
+                            <span class="url-lbl">Token-Only URL (Hash Token):</span>
+                            <span class="url-sub">Single-credential auth (Upstash &amp; Serverless style)</span>
+                        </div>
+                        <div class="url-input-wrap">
+                            <input type="text" id="connTokenUrlInput" readonly class="studio-input font-mono">
+                            <button class="btn btn-secondary btn-sm" id="copyConnTokenUrlBtn" title="Copy Token URL">
+                                <iconify-icon icon="lucide:copy" width="14"></iconify-icon>
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Integration Framework Tabs -->
+                <div class="connect-tabs-header">
+                    <button class="connect-tab active" data-tab="prisma">
+                        <iconify-icon icon="logos:prisma" width="14"></iconify-icon>
+                        Prisma ORM
+                    </button>
+                    <button class="connect-tab" data-tab="ioredis">
+                        <iconify-icon icon="logos:nodejs-icon" width="14"></iconify-icon>
+                        ioredis (Node)
+                    </button>
+                    <button class="connect-tab" data-tab="python">
+                        <iconify-icon icon="logos:python" width="14"></iconify-icon>
+                        Python (redis-py)
+                    </button>
+                    <button class="connect-tab" data-tab="cli">
+                        <iconify-icon icon="lucide:terminal" width="14" style="color: #38bdf8;"></iconify-icon>
+                        Redis CLI
+                    </button>
+                    <button class="connect-tab" data-tab="rest">
+                        <iconify-icon icon="lucide:cloud" width="14" style="color: #34d399;"></iconify-icon>
+                        REST API (Edge)
+                    </button>
+                </div>
+
+                <div class="connect-tab-content">
+                    <div class="snippet-header">
+                        <span class="snippet-title" id="snippetLanguageTitle">schema.prisma &amp; .env</span>
+                        <button class="btn btn-secondary btn-sm" id="copySnippetBtn">
+                            <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
+                            Copy Code Snippet
+                        </button>
+                    </div>
+                    <pre class="snippet-code-box"><code id="connectSnippetCode">// Loading snippet...</code></pre>
+                </div>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between;">
+                <div class="wire-status-pill">
+                    <span class="pulse-dot"></span>
+                    <span>Standard Redis RESP Wire Protocol Compatible</span>
+                </div>
+                <button class="btn btn-secondary" id="closeConnectModalBtn2">Close</button>
             </div>
         </div>
     </div>

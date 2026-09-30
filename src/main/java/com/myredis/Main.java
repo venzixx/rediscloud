@@ -26,19 +26,22 @@ public class Main {
             persistence.replay(cmdArgs -> registry.execute(cmdArgs, storage));
             persistence.init();
 
-            // 2. Start proactive TTL sweeper
-            ExpiryEngine expiryEngine = new ExpiryEngine(storage);
+            // 2. Virtual Database Manager (Multi-Tenant Isolation)
+            com.myredis.storage.VirtualDatabaseManager virtualDbManager = new com.myredis.storage.VirtualDatabaseManager(storage);
+
+            // 3. Start proactive TTL sweeper across root and virtual tenant databases
+            ExpiryEngine expiryEngine = new ExpiryEngine(storage, virtualDbManager);
             expiryEngine.start(config.getExpiryIntervalMillis());
 
-            // 3. Security & ACL Engine
+            // 4. Security & ACL Engine
             com.myredis.security.AclEngine aclEngine = new com.myredis.security.AclEngine();
 
-            // 4. Start Redis TCP Server (port 6379)
-            RedisServer redisServer = new RedisServer(config.getHost(), config.getRedisPort(), storage, registry, aclEngine);
+            // 5. Start Redis TCP Server (port 6379)
+            RedisServer redisServer = new RedisServer(config.getHost(), config.getRedisPort(), storage, registry, aclEngine, virtualDbManager);
             redisServer.start();
 
-            // 5. Start Web Management Server (port 8080)
-            WebServer webServer = new WebServer(config.getHost(), config.getWebPort(), storage, registry, aclEngine);
+            // 6. Start Web Management Server (port 8080)
+            WebServer webServer = new WebServer(config.getHost(), config.getWebPort(), config.getRedisPort(), storage, registry, aclEngine, virtualDbManager);
             webServer.start();
 
             // Graceful shutdown hook

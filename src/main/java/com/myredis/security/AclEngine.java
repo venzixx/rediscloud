@@ -49,16 +49,80 @@ public class AclEngine {
     }
 
     public void registerUser(User user) {
-        usersByName.put(user.getUsername(), user);
+        usersByName.put(user.getUsername().toLowerCase(), user);
         usersByToken.put(user.getApiToken(), user);
     }
 
+    public User getUser(String username) {
+        if (username == null) return null;
+        return usersByName.get(username.toLowerCase());
+    }
+
     public User authenticate(String username, String password) {
-        User user = usersByName.get(username);
-        if (user != null && user.getPassword().equals(password)) {
+        if (username == null || password == null) return null;
+        User user = usersByName.get(username.toLowerCase());
+        if (user != null && (user.getPassword().equals(password) || user.getApiToken().equals(password))) {
             return user;
         }
         return null;
+    }
+
+    public User authenticateSingleTokenOrPass(String tokenOrPass) {
+        if (tokenOrPass == null || tokenOrPass.isBlank()) return null;
+        String val = tokenOrPass.trim();
+
+        // Check if formatted as username:password
+        int colon = val.indexOf(':');
+        if (colon > 0) {
+            String u = val.substring(0, colon);
+            String p = val.substring(colon + 1);
+            User byPair = authenticate(u, p);
+            if (byPair != null) return byPair;
+        }
+
+        // Direct token lookup
+        User byToken = usersByToken.get(val);
+        if (byToken != null) return byToken;
+
+        // Check passwords of registered users
+        for (User u : usersByName.values()) {
+            if (u.getPassword().equals(val) || u.getApiToken().equals(val)) {
+                return u;
+            }
+        }
+        return null;
+    }
+
+    public User createTenantAccount(String username, String password, String customToken) {
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("Username is required");
+        }
+        String cleanUser = username.trim().toLowerCase();
+        if (usersByName.containsKey(cleanUser)) {
+            throw new IllegalArgumentException("Account '" + cleanUser + "' already exists");
+        }
+
+        String token = (customToken != null && !customToken.isBlank())
+                ? customToken.trim()
+                : "red_api_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+
+        String pass = (password != null && !password.isBlank())
+                ? password.trim()
+                : "sec_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+
+        User newUser = new User(
+                cleanUser,
+                pass,
+                token,
+                User.Role.READ_WRITE,
+                List.of("*"),
+                Collections.emptySet(),
+                "vdb_" + cleanUser,
+                System.currentTimeMillis()
+        );
+
+        registerUser(newUser);
+        return newUser;
     }
 
     public User authenticateToken(String token) {
@@ -72,6 +136,15 @@ public class AclEngine {
 
     public User getDefaultAdminUser() {
         return usersByName.get("admin");
+    }
+
+    public List<Map<String, Object>> listUsersWithUrls(String host, int redisPort, int webPort) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (User u : usersByName.values()) {
+            list.add(u.toMap(host, redisPort, webPort));
+        }
+        list.sort(Comparator.comparing(m -> (String) m.get("username")));
+        return list;
     }
 
     /**

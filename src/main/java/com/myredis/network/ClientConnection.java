@@ -24,14 +24,24 @@ public class ClientConnection implements Runnable {
     private final StorageEngine storage;
     private final CommandRegistry registry;
     private final com.myredis.security.AclEngine aclEngine;
+    private final com.myredis.storage.VirtualDatabaseManager virtualDbManager;
     private com.myredis.security.User authenticatedUser;
+    private volatile StorageEngine currentStorage;
 
-    public ClientConnection(Socket socket, StorageEngine storage, CommandRegistry registry, com.myredis.security.AclEngine aclEngine) {
+    public ClientConnection(Socket socket, StorageEngine storage, CommandRegistry registry, com.myredis.security.AclEngine aclEngine, com.myredis.storage.VirtualDatabaseManager virtualDbManager) {
         this.socket = socket;
         this.storage = storage;
         this.registry = registry;
         this.aclEngine = aclEngine;
+        this.virtualDbManager = virtualDbManager;
         this.authenticatedUser = aclEngine != null ? aclEngine.getDefaultAdminUser() : null;
+        this.currentStorage = (virtualDbManager != null && authenticatedUser != null)
+                ? virtualDbManager.getStorageForUser(authenticatedUser.getUsername())
+                : storage;
+    }
+
+    public ClientConnection(Socket socket, StorageEngine storage, CommandRegistry registry, com.myredis.security.AclEngine aclEngine) {
+        this(socket, storage, registry, aclEngine, null);
     }
 
     @Override
@@ -77,26 +87,41 @@ public class ClientConnection implements Runnable {
                     break;
                 }
 
-                // Handle AUTH command
+                // Handle AUTH command (supports both AUTH <pass/token> and AUTH <user> <pass>)
                 if ("AUTH".equals(cmdName) && aclEngine != null) {
+                    com.myredis.security.User u = null;
                     if (args.size() == 2) {
-                        var u = aclEngine.authenticate("admin", args.get(1));
-                        if (u != null) {
-                            authenticatedUser = u;
-                            RespEncoder.encode(RespMessage.OK, out);
-                        } else {
-                            RespEncoder.encode(RespMessage.error("WRONGPASS invalid username-password pair or user is disabled."), out);
-                        }
+                        u = aclEngine.authenticateSingleTokenOrPass(args.get(1));
                     } else if (args.size() == 3) {
-                        var u = aclEngine.authenticate(args.get(1), args.get(2));
-                        if (u != null) {
-                            authenticatedUser = u;
-                            RespEncoder.encode(RespMessage.OK, out);
-                        } else {
-                            RespEncoder.encode(RespMessage.error("WRONGPASS invalid username-password pair or user is disabled."), out);
-                        }
+                        u = aclEngine.authenticate(args.get(1), args.get(2));
                     } else {
                         RespEncoder.encode(RespMessage.error("ERR wrong number of arguments for 'auth' command"), out);
+                        out.flush();
+                        continue;
+                    }
+
+                    if (u != null) {
+                        authenticatedUser = u;
+                        if (virtualDbManager != null) {
+                            currentStorage = virtualDbManager.getStorageForUser(u.getUsername());
+                        }
+                        RespEncoder.encode(RespMessage.OK, out);
+                    } else {
+                        RespEncoder.encode(RespMessage.error("WRONGPASS invalid username-password pair or user is disabled."), out);
+                    }
+                    out.flush();
+                    continue;
+                }
+
+                // Handle SELECT command for database switching
+                if ("SELECT".equals(cmdName)) {
+                    if (args.size() >= 2) {
+                        if (virtualDbManager != null) {
+                            currentStorage = virtualDbManager.getStorageByDbName(args.get(1));
+                        }
+                        RespEncoder.encode(RespMessage.OK, out);
+                    } else {
+                        RespEncoder.encode(RespMessage.error("ERR wrong number of arguments for 'select' command"), out);
                     }
                     out.flush();
                     continue;
@@ -113,7 +138,7 @@ public class ClientConnection implements Runnable {
                     }
                 }
 
-                RespMessage response = registry.execute(args, storage);
+                RespMessage response = registry.execute(args, currentStorage);
                 RespEncoder.encode(response, out);
                 out.flush();
             }

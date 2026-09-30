@@ -1,7 +1,9 @@
 package com.myredis.web;
 
 import com.myredis.commands.CommandRegistry;
+import com.myredis.security.AclEngine;
 import com.myredis.storage.StorageEngine;
+import com.myredis.storage.VirtualDatabaseManager;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
@@ -16,25 +18,34 @@ public class WebServer {
 
     private final String host;
     private final int port;
+    private final int redisPort;
     private final StorageEngine storage;
     private final CommandRegistry registry;
-    private final com.myredis.security.AclEngine aclEngine;
+    private final AclEngine aclEngine;
+    private final VirtualDatabaseManager virtualDbManager;
     private HttpServer server;
 
-    public WebServer(String host, int port, StorageEngine storage, CommandRegistry registry, com.myredis.security.AclEngine aclEngine) {
+    public WebServer(String host, int port, int redisPort, StorageEngine storage,
+                     CommandRegistry registry, AclEngine aclEngine, VirtualDatabaseManager virtualDbManager) {
         this.host = host;
         this.port = port;
+        this.redisPort = redisPort > 0 ? redisPort : 6379;
         this.storage = storage;
         this.registry = registry;
         this.aclEngine = aclEngine;
+        this.virtualDbManager = virtualDbManager;
+    }
+
+    public WebServer(String host, int port, StorageEngine storage, CommandRegistry registry, AclEngine aclEngine) {
+        this(host, port, 6379, storage, registry, aclEngine, null);
     }
 
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(host, port), 0);
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
 
-        server.createContext("/v1/", new CloudApiHandler(storage, registry, aclEngine));
-        server.createContext("/api/", new ApiHandler(storage, registry, aclEngine));
+        server.createContext("/v1/", new CloudApiHandler(storage, registry, aclEngine, virtualDbManager, redisPort, port));
+        server.createContext("/api/", new ApiHandler(storage, registry, aclEngine, virtualDbManager, redisPort, port));
         server.createContext("/", new StaticResourceHandler());
 
         server.start();

@@ -76,6 +76,14 @@ public class ServerMetrics {
         return runtime.totalMemory() - runtime.freeMemory();
     }
 
+    public long getUsedMemoryBytes() {
+        return getUsedMemory();
+    }
+
+    public String getUsedMemoryHuman() {
+        return formatBytes(getUsedMemory());
+    }
+
     public long getTotalMemory() {
         return Runtime.getRuntime().totalMemory();
     }

@@ -3,13 +3,14 @@ package com.myredis.web;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myredis.commands.CommandRegistry;
 import com.myredis.protocol.RespMessage;
-import com.myredis.storage.DataType;
+import com.myredis.security.AclEngine;
+import com.myredis.security.User;
 import com.myredis.storage.StorageEngine;
+import com.myredis.storage.VirtualDatabaseManager;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -18,18 +19,30 @@ import java.util.*;
 
 /**
  * REST API handler for the Redis Web Dashboard and management console.
+ * Supports multi-tenant virtual database selection and tenant account provisioning.
  */
 public class ApiHandler implements HttpHandler {
 
     private final StorageEngine storage;
     private final CommandRegistry registry;
-    private final com.myredis.security.AclEngine aclEngine;
+    private final AclEngine aclEngine;
+    private final VirtualDatabaseManager virtualDbManager;
+    private final int redisPort;
+    private final int webPort;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public ApiHandler(StorageEngine storage, CommandRegistry registry, com.myredis.security.AclEngine aclEngine) {
+    public ApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine,
+                      VirtualDatabaseManager virtualDbManager, int redisPort, int webPort) {
         this.storage = storage;
         this.registry = registry;
         this.aclEngine = aclEngine;
+        this.virtualDbManager = virtualDbManager;
+        this.redisPort = redisPort > 0 ? redisPort : 6379;
+        this.webPort = webPort > 0 ? webPort : 8080;
+    }
+
+    public ApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine) {
+        this(storage, registry, aclEngine, null, 6379, 8080);
     }
 
     @Override
@@ -69,6 +82,12 @@ public class ApiHandler implements HttpHandler {
                 handleImport(exchange);
             } else if (path.equals("/api/acl") && "GET".equals(method)) {
                 handleAclList(exchange);
+            } else if (path.equals("/api/tenants") && "GET".equals(method)) {
+                handleListTenants(exchange);
+            } else if (path.equals("/api/tenants") && "POST".equals(method)) {
+                handleCreateTenant(exchange);
+            } else if (path.equals("/api/auth/register") && "POST".equals(method)) {
+                handleCreateTenant(exchange);
             } else if (path.equals("/api/benchmark") && "POST".equals(method)) {
                 handleBenchmark(exchange);
             } else if (path.equals("/api/flush") && "POST".equals(method)) {
@@ -81,13 +100,102 @@ public class ApiHandler implements HttpHandler {
         }
     }
 
+    private StorageEngine resolveStorage(Map<String, String> queryParams) {
+        if (virtualDbManager == null) return storage;
+        String tenant = queryParams.get("tenant");
+        if (tenant != null && !tenant.isBlank()) {
+            return virtualDbManager.getStorageForUser(tenant);
+        }
+        String db = queryParams.get("db");
+        if (db != null && !db.isBlank()) {
+            return virtualDbManager.getStorageByDbName(db);
+        }
+        return storage;
+    }
+
+    private StorageEngine resolveStorage(Map<String, Object> req, Map<String, String> queryParams) {
+        if (virtualDbManager == null) return storage;
+        if (req != null) {
+            if (req.containsKey("tenant") && req.get("tenant") != null) {
+                return virtualDbManager.getStorageForUser(String.valueOf(req.get("tenant")));
+            }
+            if (req.containsKey("db") && req.get("db") != null) {
+                return virtualDbManager.getStorageByDbName(String.valueOf(req.get("db")));
+            }
+        }
+        return resolveStorage(queryParams);
+    }
+
+    private String getActiveDbName(Map<String, String> qp) {
+        if (qp.containsKey("tenant") && !qp.get("tenant").isBlank()) {
+            return "vdb_" + qp.get("tenant").toLowerCase();
+        }
+        if (qp.containsKey("db") && !qp.get("db").isBlank()) {
+            return qp.get("db");
+        }
+        return "db0";
+    }
+
     private void handleStats(HttpExchange exchange) throws IOException {
-        Map<String, Object> stats = storage.getMetrics().toMap(storage.dbSize());
+        Map<String, String> qp = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(qp);
+        Map<String, Object> stats = target.getMetrics().toMap(target.dbSize());
+        stats.put("activeDb", getActiveDbName(qp));
+        stats.put("databases", virtualDbManager != null ? virtualDbManager.listDatabases() : List.of());
         sendJson(exchange, 200, stats);
+    }
+
+    private void handleListTenants(HttpExchange exchange) throws IOException {
+        String host = resolveHost(exchange);
+        List<Map<String, Object>> users = aclEngine != null ? aclEngine.listUsersWithUrls(host, redisPort, webPort) : Collections.emptyList();
+        if (virtualDbManager != null) {
+            for (Map<String, Object> uMap : users) {
+                String username = (String) uMap.get("username");
+                StorageEngine se = virtualDbManager.getStorageForUser(username);
+                uMap.put("keyCount", se.dbSize());
+                uMap.put("memoryBytes", se.getMetrics().getUsedMemoryBytes());
+                uMap.put("memoryHuman", se.getMetrics().getUsedMemoryHuman());
+            }
+        }
+        List<Map<String, Object>> dbs = virtualDbManager != null ? virtualDbManager.listDatabases() : List.of();
+        sendJson(exchange, 200, Map.of(
+                "tenants", users,
+                "databases", dbs
+        ));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleCreateTenant(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = body.isBlank() ? Collections.emptyMap() : mapper.readValue(body, Map.class);
+        String username = (String) req.get("username");
+        String password = (String) req.get("password");
+        String token = (String) req.get("token");
+
+        if (username == null || username.trim().isEmpty()) {
+            sendJson(exchange, 400, Map.of("error", "Username is required"));
+            return;
+        }
+
+        try {
+            User u = aclEngine.createTenantAccount(username, password, token);
+            if (virtualDbManager != null) {
+                virtualDbManager.getStorageForUser(u.getUsername());
+            }
+            String host = resolveHost(exchange);
+            sendJson(exchange, 201, Map.of(
+                    "success", true,
+                    "message", "Tenant account provisioned with virtual database " + u.getVirtualDbName(),
+                    "user", u.toMap(host, redisPort, webPort)
+            ));
+        } catch (IllegalArgumentException iae) {
+            sendJson(exchange, 400, Map.of("error", iae.getMessage()));
+        }
     }
 
     private void handleListKeys(HttpExchange exchange) throws IOException {
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(queryParams);
         String pattern = queryParams.getOrDefault("pattern", "*");
         String typeFilter = queryParams.get("type");
         String namespace = queryParams.get("namespace");
@@ -100,19 +208,20 @@ public class ApiHandler implements HttpHandler {
             if (queryParams.containsKey("limit")) limit = Math.max(5, Math.min(500, Integer.parseInt(queryParams.get("limit"))));
         } catch (NumberFormatException ignored) {}
 
-        StorageEngine.KeyPageResult result = storage.queryKeys(pattern, typeFilter, namespace, sort, page, limit);
+        StorageEngine.KeyPageResult result = target.queryKeys(pattern, typeFilter, namespace, sort, page, limit);
         sendJson(exchange, 200, result);
     }
 
     private void handleGetKey(HttpExchange exchange) throws IOException {
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(queryParams);
         String key = queryParams.get("key");
         if (key == null || key.isBlank()) {
             sendJson(exchange, 400, Map.of("error", "Missing 'key' query parameter"));
             return;
         }
 
-        Map<String, Object> details = storage.getKeyDetails(key);
+        Map<String, Object> details = target.getKeyDetails(key);
         if (details == null) {
             sendJson(exchange, 404, Map.of("error", "Key not found or expired"));
             return;
@@ -125,6 +234,8 @@ public class ApiHandler implements HttpHandler {
     private void handleSaveKey(HttpExchange exchange) throws IOException {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Map<String, Object> request = mapper.readValue(body, Map.class);
+        Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(request, queryParams);
 
         String key = (String) request.get("key");
         String type = (String) request.getOrDefault("type", "string");
@@ -144,40 +255,40 @@ public class ApiHandler implements HttpHandler {
         switch (type.toLowerCase()) {
             case "string" -> {
                 String strVal = valObj != null ? valObj.toString() : "";
-                storage.set(key, strVal, expireAtMillis, false, false);
+                target.set(key, strVal, expireAtMillis, false, false);
             }
             case "hash" -> {
-                storage.del(List.of(key));
+                target.del(List.of(key));
                 Map<String, String> hash = new HashMap<>();
                 if (valObj instanceof Map<?, ?> m) {
                     for (Map.Entry<?, ?> e : m.entrySet()) {
                         hash.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
                     }
                 }
-                storage.hset(key, hash);
-                if (expireAtMillis != null) storage.pexpire(key, expireAtMillis - System.currentTimeMillis());
+                target.hset(key, hash);
+                if (expireAtMillis != null) target.pexpire(key, expireAtMillis - System.currentTimeMillis());
             }
             case "list" -> {
-                storage.del(List.of(key));
+                target.del(List.of(key));
                 List<String> list = new ArrayList<>();
                 if (valObj instanceof List<?> l) {
                     for (Object item : l) list.add(String.valueOf(item));
                 } else if (valObj instanceof String s) {
                     for (String item : s.split(",")) list.add(item.trim());
                 }
-                if (!list.isEmpty()) storage.rpush(key, list);
-                if (expireAtMillis != null) storage.pexpire(key, expireAtMillis - System.currentTimeMillis());
+                if (!list.isEmpty()) target.rpush(key, list);
+                if (expireAtMillis != null) target.pexpire(key, expireAtMillis - System.currentTimeMillis());
             }
             case "set" -> {
-                storage.del(List.of(key));
+                target.del(List.of(key));
                 List<String> set = new ArrayList<>();
                 if (valObj instanceof List<?> l) {
                     for (Object item : l) set.add(String.valueOf(item));
                 } else if (valObj instanceof String s) {
                     for (String item : s.split(",")) set.add(item.trim());
                 }
-                if (!set.isEmpty()) storage.sadd(key, set);
-                if (expireAtMillis != null) storage.pexpire(key, expireAtMillis - System.currentTimeMillis());
+                if (!set.isEmpty()) target.sadd(key, set);
+                if (expireAtMillis != null) target.pexpire(key, expireAtMillis - System.currentTimeMillis());
             }
             default -> {
                 sendJson(exchange, 400, Map.of("error", "Unsupported type: " + type));
@@ -190,13 +301,14 @@ public class ApiHandler implements HttpHandler {
 
     private void handleDeleteKey(HttpExchange exchange) throws IOException {
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(queryParams);
         String key = queryParams.get("key");
         if (key == null || key.isBlank()) {
             sendJson(exchange, 400, Map.of("error", "Missing 'key' query parameter"));
             return;
         }
 
-        int count = storage.del(List.of(key));
+        int count = target.del(List.of(key));
         sendJson(exchange, 200, Map.of("success", true, "deletedCount", count));
     }
 
@@ -204,8 +316,10 @@ public class ApiHandler implements HttpHandler {
     private void handleExecCommand(HttpExchange exchange) throws IOException {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Map<String, Object> req = mapper.readValue(body, Map.class);
-        String rawCommand = (String) req.get("command");
+        Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(req, queryParams);
 
+        String rawCommand = (String) req.get("command");
         if (rawCommand == null || rawCommand.isBlank()) {
             sendJson(exchange, 400, Map.of("error", "Command string cannot be empty"));
             return;
@@ -217,7 +331,7 @@ public class ApiHandler implements HttpHandler {
             return;
         }
 
-        RespMessage resp = registry.execute(tokens, storage);
+        RespMessage resp = registry.execute(tokens, target);
         String formattedOutput = formatRespHuman(resp);
 
         sendJson(exchange, 200, Map.of(
@@ -231,17 +345,22 @@ public class ApiHandler implements HttpHandler {
     private void handleBatchDelete(HttpExchange exchange) throws IOException {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Map<String, Object> req = mapper.readValue(body, Map.class);
+        Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(req, queryParams);
+
         List<String> keys = (List<String>) req.get("keys");
         if (keys == null || keys.isEmpty()) {
             sendJson(exchange, 400, Map.of("error", "No keys provided for deletion"));
             return;
         }
-        int deleted = storage.del(keys);
+        int deleted = target.del(keys);
         sendJson(exchange, 200, Map.of("success", true, "deletedCount", deleted));
     }
 
     private void handleExport(HttpExchange exchange) throws IOException {
-        List<Map<String, Object>> data = storage.exportData();
+        Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(queryParams);
+        List<Map<String, Object>> data = target.exportData();
         Map<String, Object> export = Map.of(
                 "exportedAt", System.currentTimeMillis(),
                 "totalKeys", data.size(),
@@ -254,6 +373,9 @@ public class ApiHandler implements HttpHandler {
     private void handleImport(HttpExchange exchange) throws IOException {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Map<String, Object> req = mapper.readValue(body, Map.class);
+        Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(req, queryParams);
+
         List<Map<String, Object>> keys = (List<Map<String, Object>>) req.get("keys");
         if (keys == null) {
             sendJson(exchange, 400, Map.of("error", "Invalid import format: missing 'keys' list"));
@@ -269,35 +391,36 @@ public class ApiHandler implements HttpHandler {
             if (key != null && val != null) {
                 Long expireAt = (ttl != null && ttl.longValue() > 0) ? System.currentTimeMillis() + (ttl.longValue() * 1000L) : null;
                 switch (type.toLowerCase()) {
-                    case "string" -> storage.set(key, val.toString(), expireAt, false, false);
+                    case "string" -> target.set(key, val.toString(), expireAt, false, false);
                     case "hash" -> {
                         Map<String, String> h = new HashMap<>();
                         if (val instanceof Map<?, ?> m) {
                             for (Map.Entry<?, ?> e : m.entrySet()) h.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
                         }
-                        storage.hset(key, h);
-                        if (expireAt != null) storage.pexpire(key, expireAt - System.currentTimeMillis());
+                        target.hset(key, h);
+                        if (expireAt != null) target.pexpire(key, expireAt - System.currentTimeMillis());
                     }
                     case "list" -> {
                         List<String> l = new ArrayList<>();
                         if (val instanceof List<?> list) {
                             for (Object o : list) l.add(String.valueOf(o));
                         }
-                        if (!l.isEmpty()) storage.rpush(key, l);
-                        if (expireAt != null) storage.pexpire(key, expireAt - System.currentTimeMillis());
+                        if (!l.isEmpty()) target.rpush(key, l);
+                        if (expireAt != null) target.pexpire(key, expireAt - System.currentTimeMillis());
                     }
                     case "set" -> {
                         List<String> s = new ArrayList<>();
                         if (val instanceof List<?> set) {
                             for (Object o : set) s.add(String.valueOf(o));
                         }
-                        if (!s.isEmpty()) storage.sadd(key, s);
-                        if (expireAt != null) storage.pexpire(key, expireAt - System.currentTimeMillis());
+                        if (!s.isEmpty()) target.sadd(key, s);
+                        if (expireAt != null) target.pexpire(key, expireAt - System.currentTimeMillis());
                     }
                 }
                 imported++;
             }
         }
+
         sendJson(exchange, 200, Map.of("success", true, "importedCount", imported));
     }
 
@@ -309,6 +432,9 @@ public class ApiHandler implements HttpHandler {
     @SuppressWarnings("unchecked")
     private void handleBenchmark(HttpExchange exchange) throws IOException {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(queryParams);
+
         int totalOps = 10000;
         int concurrency = 50;
 
@@ -322,7 +448,7 @@ public class ApiHandler implements HttpHandler {
 
         try {
             com.myredis.benchmark.BenchmarkEngine.BenchmarkResult res =
-                    com.myredis.benchmark.BenchmarkEngine.runBenchmark(storage, registry, totalOps, concurrency);
+                    com.myredis.benchmark.BenchmarkEngine.runBenchmark(target, registry, totalOps, concurrency);
             sendJson(exchange, 200, res);
         } catch (InterruptedException e) {
             sendJson(exchange, 500, Map.of("error", "Benchmark interrupted"));
@@ -330,7 +456,9 @@ public class ApiHandler implements HttpHandler {
     }
 
     private void handleFlush(HttpExchange exchange) throws IOException {
-        storage.flushDb();
+        Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        StorageEngine target = resolveStorage(queryParams);
+        target.flushDb();
         sendJson(exchange, 200, Map.of("success", true, "message", "Database flushed"));
     }
 
@@ -353,6 +481,15 @@ public class ApiHandler implements HttpHandler {
                 yield sb.toString();
             }
         };
+    }
+
+    private String resolveHost(HttpExchange exchange) {
+        String host = exchange.getRequestHeaders().getFirst("Host");
+        if (host != null && !host.isBlank()) {
+            int colon = host.indexOf(':');
+            return colon > 0 ? host.substring(0, colon) : host;
+        }
+        return "localhost";
     }
 
     private void sendJson(HttpExchange exchange, int status, Object data) throws IOException {

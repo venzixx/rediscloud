@@ -23,8 +23,14 @@ public class User {
     private final List<String> keyPatterns;       // RLS: glob patterns allowed for this user
     private final List<Pattern> compiledPatterns;  // Compiled regexes for RLS matching
     private final Set<String> allowedCommands;    // If empty, allowed commands determined by role
+    private final String virtualDbName;
+    private final long createdAtMillis;
 
     public User(String username, String password, String apiToken, Role role, List<String> keyPatterns, Set<String> allowedCommands) {
+        this(username, password, apiToken, role, keyPatterns, allowedCommands, "vdb_" + username.toLowerCase(), System.currentTimeMillis());
+    }
+
+    public User(String username, String password, String apiToken, Role role, List<String> keyPatterns, Set<String> allowedCommands, String virtualDbName, long createdAtMillis) {
         this.username = username;
         this.password = password;
         this.apiToken = apiToken;
@@ -32,6 +38,8 @@ public class User {
         this.keyPatterns = keyPatterns != null ? keyPatterns : List.of("*");
         this.compiledPatterns = this.keyPatterns.stream().map(User::globToRegex).toList();
         this.allowedCommands = allowedCommands != null ? allowedCommands : Collections.emptySet();
+        this.virtualDbName = virtualDbName != null ? virtualDbName : ("vdb_" + username.toLowerCase());
+        this.createdAtMillis = createdAtMillis > 0 ? createdAtMillis : System.currentTimeMillis();
     }
 
     public String getUsername() {
@@ -52,6 +60,42 @@ public class User {
 
     public List<String> getKeyPatterns() {
         return keyPatterns;
+    }
+
+    public String getVirtualDbName() {
+        return virtualDbName;
+    }
+
+    public long getCreatedAtMillis() {
+        return createdAtMillis;
+    }
+
+    public java.util.Map<String, Object> toMap(String host, int redisPort, int webPort) {
+        String effectiveHost = (host == null || host.equals("0.0.0.0")) ? "localhost" : host;
+        String stdUrl = "redis://" + username + ":" + password + "@" + effectiveHost + ":" + redisPort;
+        String tokenUrl = "redis://:" + apiToken + "@" + effectiveHost + ":" + redisPort;
+        String restUrl = "http://" + effectiveHost + ":" + webPort + "/v1";
+
+        java.util.Map<String, Object> map = new java.util.LinkedHashMap<>();
+        map.put("username", username);
+        map.put("role", role.name());
+        map.put("virtualDb", virtualDbName);
+        map.put("apiToken", apiToken);
+        map.put("password", password);
+        map.put("keyPatterns", keyPatterns);
+        map.put("createdAt", createdAtMillis);
+
+        java.util.Map<String, String> urls = new java.util.LinkedHashMap<>();
+        urls.put("redisUrl", stdUrl);
+        urls.put("tokenUrl", tokenUrl);
+        urls.put("prisma", stdUrl);
+        urls.put("ioredis", stdUrl);
+        urls.put("restUrl", restUrl);
+        urls.put("cliCommand", "redis-cli -u " + stdUrl);
+        urls.put("envSnippet", "REDIS_URL=\"" + stdUrl + "\"\nUPSTASH_REDIS_REST_URL=\"" + restUrl + "\"\nUPSTASH_REDIS_REST_TOKEN=\"" + apiToken + "\"");
+
+        map.put("connectionUrls", urls);
+        return map;
     }
 
     /**

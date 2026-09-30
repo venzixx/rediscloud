@@ -20,15 +20,21 @@ public class RedisServer {
     private final StorageEngine storage;
     private final CommandRegistry registry;
     private final com.myredis.security.AclEngine aclEngine;
+    private final com.myredis.storage.VirtualDatabaseManager virtualDbManager;
     private ServerSocket serverSocket;
     private volatile boolean running = false;
 
-    public RedisServer(String host, int port, StorageEngine storage, CommandRegistry registry, com.myredis.security.AclEngine aclEngine) {
+    public RedisServer(String host, int port, StorageEngine storage, CommandRegistry registry, com.myredis.security.AclEngine aclEngine, com.myredis.storage.VirtualDatabaseManager virtualDbManager) {
         this.host = host;
         this.port = port;
         this.storage = storage;
         this.registry = registry;
         this.aclEngine = aclEngine;
+        this.virtualDbManager = virtualDbManager;
+    }
+
+    public RedisServer(String host, int port, StorageEngine storage, CommandRegistry registry, com.myredis.security.AclEngine aclEngine) {
+        this(host, port, storage, registry, aclEngine, null);
     }
 
     public void start() throws IOException {
@@ -41,7 +47,8 @@ public class RedisServer {
         System.out.println("  * Running Redis Server on " + host + ":" + port);
         System.out.println("  * Concurrency Engine: Java 25 Virtual Threads");
         System.out.println("  * Security Engine:    ACL & Key-Level Security (RLS)");
-        System.out.println("  * Compatible with standard redis-cli & Jedis");
+        System.out.println("  * Multi-Tenancy:      Database Virtualization Engine");
+        System.out.println("  * Compatible with standard redis-cli, Jedis, Prisma");
         System.out.println("=================================================");
 
         // Accept loop running on a dedicated virtual thread
@@ -57,7 +64,7 @@ public class RedisServer {
                 // Spawn a lightweight virtual thread per client
                 Thread.ofVirtual()
                         .name("client-" + socket.getRemoteSocketAddress())
-                        .start(new ClientConnection(socket, storage, registry, aclEngine));
+                        .start(new ClientConnection(socket, storage, registry, aclEngine, virtualDbManager));
 
             } catch (IOException e) {
                 if (!running) {

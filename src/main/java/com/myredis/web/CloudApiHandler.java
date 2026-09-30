@@ -6,6 +6,7 @@ import com.myredis.protocol.RespMessage;
 import com.myredis.security.AclEngine;
 import com.myredis.security.User;
 import com.myredis.storage.StorageEngine;
+import com.myredis.storage.VirtualDatabaseManager;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 
@@ -19,26 +20,37 @@ import java.util.*;
 /**
  * Serverless Cloud HTTP REST API for Redis (compatible with Upstash / Vercel KV style).
  * Allows edge, browser, and cloud serverless functions to interact with Redis over HTTP
- * with strict ACL and Row/Key-Level Security (RLS) enforcement.
+ * with strict multi-tenant database virtualization, ACL, and RLS enforcement.
  */
 public class CloudApiHandler implements HttpHandler {
 
     private final StorageEngine storage;
     private final CommandRegistry registry;
     private final AclEngine aclEngine;
+    private final VirtualDatabaseManager virtualDbManager;
+    private final int redisPort;
+    private final int webPort;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public CloudApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine) {
+    public CloudApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine,
+                           VirtualDatabaseManager virtualDbManager, int redisPort, int webPort) {
         this.storage = storage;
         this.registry = registry;
         this.aclEngine = aclEngine;
+        this.virtualDbManager = virtualDbManager;
+        this.redisPort = redisPort > 0 ? redisPort : 6379;
+        this.webPort = webPort > 0 ? webPort : 8080;
+    }
+
+    public CloudApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine) {
+        this(storage, registry, aclEngine, null, 6379, 8080);
     }
 
     @Override
     public void handle(HttpExchange exchange) throws IOException {
         String method = exchange.getRequestMethod().toUpperCase();
         URI uri = exchange.getRequestURI();
-        String path = uri.getPath(); // e.g. /v1/get/mykey or /v1/set
+        String path = uri.getPath(); // e.g. /v1/get/mykey or /v1/auth/signup
 
         // CORS headers
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
@@ -50,11 +62,26 @@ public class CloudApiHandler implements HttpHandler {
             return;
         }
 
-        // 1. Authenticate via Bearer Token
+        String cleanPath = path.toLowerCase();
+
+        // 1. Public Auth Endpoints (No Bearer token required)
+        if (cleanPath.equals("/v1/auth/signup") || cleanPath.equals("/v1/auth/register")) {
+            if ("POST".equalsIgnoreCase(method)) {
+                handleAuthSignup(exchange);
+                return;
+            }
+        } else if (cleanPath.equals("/v1/auth/login")) {
+            if ("POST".equalsIgnoreCase(method)) {
+                handleAuthLogin(exchange);
+                return;
+            }
+        }
+
+        // 2. Authenticate via Bearer Token or Query Param
         String authHeader = exchange.getRequestHeaders().getFirst("Authorization");
         User user = aclEngine.authenticateToken(authHeader);
 
-        // If no token provided in request header, check query param ?token=...
+        // If no token in Authorization header, check query param ?token=...
         if (user == null) {
             Map<String, String> qp = parseQueryParams(uri.getQuery());
             if (qp.containsKey("token")) {
@@ -64,13 +91,20 @@ public class CloudApiHandler implements HttpHandler {
 
         if (user == null) {
             sendJson(exchange, 401, Map.of(
-                    "error", "Unauthorized: Valid Bearer token required in Authorization header (e.g. 'Bearer tok_admin_live_secret')",
-                    "hint", "Use default tokens: 'tok_admin_live_secret' (Admin), 'tok_ro_public' (ReadOnly), or 'tok_app_tenant' (RLS app:*)"
+                    "error", "Unauthorized: Valid Bearer token required in Authorization header (e.g. 'Bearer red_api_...')",
+                    "hint", "Create an account via POST /v1/auth/signup or use 'tok_admin_live_secret'"
             ));
             return;
         }
 
         try {
+            // Profile & Connection info
+            if (cleanPath.equals("/v1/auth/me")) {
+                String host = resolveHost(exchange);
+                sendJson(exchange, 200, user.toMap(host, redisPort, webPort));
+                return;
+            }
+
             // Route /v1/...
             String subPath = path.startsWith("/v1/") ? path.substring(4) : path;
             String[] segments = Arrays.stream(subPath.split("/"))
@@ -79,11 +113,14 @@ public class CloudApiHandler implements HttpHandler {
                     .toArray(String[]::new);
 
             if (segments.length == 0) {
+                String host = resolveHost(exchange);
                 sendJson(exchange, 200, Map.of(
                         "service", "Redis Cloud HTTP Command API (Java 25)",
                         "authenticated_as", user.getUsername(),
                         "role", user.getRole().name(),
-                        "rls_patterns", user.getKeyPatterns()
+                        "virtual_db", user.getVirtualDbName(),
+                        "rls_patterns", user.getKeyPatterns(),
+                        "account", user.toMap(host, redisPort, webPort)
                 ));
                 return;
             }
@@ -116,6 +153,72 @@ public class CloudApiHandler implements HttpHandler {
         } catch (Exception e) {
             sendJson(exchange, 500, Map.of("error", e.getMessage() != null ? e.getMessage() : "Internal server error"));
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleAuthSignup(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = body.isBlank() ? Collections.emptyMap() : mapper.readValue(body, Map.class);
+        String username = (String) req.get("username");
+        String password = (String) req.get("password");
+        String token = (String) req.get("token");
+
+        if (username == null || username.trim().isEmpty()) {
+            sendJson(exchange, 400, Map.of("error", "Username is required"));
+            return;
+        }
+
+        try {
+            User u = aclEngine.createTenantAccount(username, password, token);
+            if (virtualDbManager != null) {
+                virtualDbManager.getStorageForUser(u.getUsername());
+            }
+            String host = resolveHost(exchange);
+            sendJson(exchange, 201, Map.of(
+                    "success", true,
+                    "message", "Tenant account provisioned with isolated database " + u.getVirtualDbName(),
+                    "account", u.toMap(host, redisPort, webPort)
+            ));
+        } catch (IllegalArgumentException iae) {
+            sendJson(exchange, 400, Map.of("error", iae.getMessage()));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleAuthLogin(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = body.isBlank() ? Collections.emptyMap() : mapper.readValue(body, Map.class);
+        String username = (String) req.get("username");
+        String password = (String) req.get("password");
+        String token = (String) req.get("token");
+
+        User u = null;
+        if (token != null && !token.isBlank()) {
+            u = aclEngine.authenticateSingleTokenOrPass(token);
+        } else if (username != null && password != null) {
+            u = aclEngine.authenticate(username, password);
+        } else if (username != null) {
+            u = aclEngine.authenticateSingleTokenOrPass(username);
+        }
+
+        if (u == null) {
+            sendJson(exchange, 401, Map.of("error", "Invalid credentials"));
+            return;
+        }
+
+        String host = resolveHost(exchange);
+        sendJson(exchange, 200, Map.of(
+                "success", true,
+                "authenticated_as", u.getUsername(),
+                "account", u.toMap(host, redisPort, webPort)
+        ));
+    }
+
+    private StorageEngine resolveStorage(User user) {
+        if (virtualDbManager != null && user != null) {
+            return virtualDbManager.getStorageForUser(user.getUsername());
+        }
+        return storage;
     }
 
     private void handleGet(HttpExchange exchange, String[] segments, User user) throws IOException {
@@ -280,13 +383,14 @@ public class CloudApiHandler implements HttpHandler {
             }
         }
 
+        StorageEngine target = resolveStorage(user);
         List<Object> results = new ArrayList<>();
         for (Object item : commands) {
             if (item instanceof List<?> cmdList) {
                 List<String> strArgs = cmdList.stream().map(String::valueOf).toList();
                 try {
                     aclEngine.verifyPermission(user, strArgs);
-                    RespMessage resp = registry.execute(strArgs, storage);
+                    RespMessage resp = registry.execute(strArgs, target);
                     results.add(respToNative(resp));
                 } catch (SecurityException se) {
                     results.add(Map.of("error", se.getMessage()));
@@ -324,7 +428,8 @@ public class CloudApiHandler implements HttpHandler {
         // Enforce ACL + RLS
         aclEngine.verifyPermission(user, cmdArgs);
 
-        RespMessage resp = registry.execute(cmdArgs, storage);
+        StorageEngine target = resolveStorage(user);
+        RespMessage resp = registry.execute(cmdArgs, target);
         Object nativeVal = respToNative(resp);
 
         if (resp.getType() == com.myredis.protocol.RespType.ERROR) {
@@ -351,6 +456,15 @@ public class CloudApiHandler implements HttpHandler {
                 yield list;
             }
         };
+    }
+
+    private String resolveHost(HttpExchange exchange) {
+        String host = exchange.getRequestHeaders().getFirst("Host");
+        if (host != null && !host.isBlank()) {
+            int colon = host.indexOf(':');
+            return colon > 0 ? host.substring(0, colon) : host;
+        }
+        return "localhost";
     }
 
     private void sendJson(HttpExchange exchange, int status, Object data) throws IOException {

@@ -13,8 +13,15 @@ let pollTimer = null;
 let activeInspectKey = null;
 let inspectCache = null;
 
+let activeVirtualDb = 'default';
+let databasesCache = [];
+let tenantsCache = [];
+let activeConnectTenantUsername = 'admin';
+let activeConnectTab = 'prisma';
+
 document.addEventListener('DOMContentLoaded', () => {
     initNavigation();
+    initVirtualDatabaseSelector();
     initDatasheetToolbar();
     initPagination();
     initInspector();
@@ -24,9 +31,12 @@ document.addEventListener('DOMContentLoaded', () => {
     initLiveSync();
     initCloudApiPlayground();
     initBenchmarkEngine();
+    initTenantsPanel();
+    initConnectModal();
 
     fetchKeys();
     fetchStats();
+    loadTenants();
 });
 
 // ==========================================
@@ -53,6 +63,9 @@ function initNavigation() {
                 }
                 updateBreadcrumb();
                 fetchKeys();
+            } else if (targetPaneId === 'pane-tenants') {
+                updateBreadcrumb('Accounts & Virtual DBs');
+                loadTenants();
             } else if (targetPaneId === 'pane-cloud-api') {
                 updateBreadcrumb('Cloud REST API & RLS');
                 loadAclUsers();
@@ -68,13 +81,15 @@ function initNavigation() {
     });
 
     document.getElementById('flushDbBtn').addEventListener('click', async () => {
-        if (!confirm('⚠️ Are you sure you want to FLUSH the entire database? All records will be erased.')) {
+        const dbName = activeVirtualDb === 'default' ? 'db0' : activeVirtualDb;
+        if (!confirm(`⚠️ Are you sure you want to FLUSH database [${dbName}]? All records in this keyspace will be erased.`)) {
             return;
         }
         try {
-            const res = await fetch('/api/flush', { method: 'POST' });
+            const endpoint = `/api/flush${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`;
+            const res = await fetch(endpoint, { method: 'POST' });
             if (res.ok) {
-                showToast('Database flushed');
+                showToast(`Database [${dbName}] flushed`);
                 selectedKeys.clear();
                 updateBatchBar();
                 currentPage = 1;
@@ -150,7 +165,7 @@ function initDatasheetToolbar() {
             const res = await fetch('/api/batch-delete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ keys: Array.from(selectedKeys) })
+                body: JSON.stringify({ keys: Array.from(selectedKeys), db: activeVirtualDb })
             });
             const data = await res.json();
             if (data.success) {
@@ -295,6 +310,9 @@ async function fetchKeys(isSilent = false) {
         if (activeTypeFilter !== 'ALL') params.append('type', activeTypeFilter);
         if (activeNamespace) params.append('namespace', activeNamespace);
         if (currentSearch) params.append('pattern', currentSearch);
+        if (activeVirtualDb && activeVirtualDb !== 'default' && activeVirtualDb !== 'db0') {
+            params.append('db', activeVirtualDb);
+        }
 
         const res = await fetch(`/api/keys?${params.toString()}`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -468,7 +486,8 @@ function getTypeBadgeClass(type) {
 async function quickDeleteKey(key) {
     if (!confirm(`Delete key "${key}"?`)) return;
     try {
-        const res = await fetch(`/api/key?key=${encodeURIComponent(key)}`, { method: 'DELETE' });
+        const endpoint = `/api/key?key=${encodeURIComponent(key)}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`;
+        const res = await fetch(endpoint, { method: 'DELETE' });
         if (res.ok) {
             showToast(`Deleted "${key}"`);
             selectedKeys.delete(key);
@@ -509,7 +528,7 @@ function initInspector() {
         await fetch('/api/exec', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: `EXPIRE "${activeInspectKey}" ${val}` })
+            body: JSON.stringify({ command: `EXPIRE "${activeInspectKey}" ${val}`, db: activeVirtualDb })
         });
         showToast(`TTL updated to ${val}s`);
         openInspector(activeInspectKey);
@@ -521,7 +540,7 @@ function initInspector() {
         await fetch('/api/exec', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: `PERSIST "${activeInspectKey}"` })
+            body: JSON.stringify({ command: `PERSIST "${activeInspectKey}"`, db: activeVirtualDb })
         });
         showToast(`Key is now persistent`);
         document.getElementById('inspTtlSeconds').value = '';
@@ -562,7 +581,8 @@ function initInspector() {
                     key: activeInspectKey,
                     type: inspectCache.type,
                     value: payloadValue,
-                    ttl: ttl
+                    ttl: ttl,
+                    db: activeVirtualDb
                 })
             });
             const d = await res.json();
@@ -582,7 +602,8 @@ function initInspector() {
 async function openInspector(key) {
     activeInspectKey = key;
     try {
-        const res = await fetch(`/api/key?key=${encodeURIComponent(key)}`);
+        const endpoint = `/api/key?key=${encodeURIComponent(key)}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`;
+        const res = await fetch(endpoint);
         if (!res.ok) throw new Error('Key not found or expired');
         const details = await res.json();
         inspectCache = details;
@@ -742,7 +763,7 @@ async function execCliCommand(cmdStr) {
         const res = await fetch('/api/exec', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmdStr })
+            body: JSON.stringify({ command: cmdStr, db: activeVirtualDb })
         });
         const data = await res.json();
 
@@ -778,7 +799,8 @@ function initExportImport() {
 
     exportBtn.addEventListener('click', async () => {
         try {
-            const res = await fetch('/api/export');
+            const endpoint = `/api/export${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`;
+            const res = await fetch(endpoint);
             const data = await res.json();
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -806,7 +828,7 @@ function initExportImport() {
                 const res = await fetch('/api/import', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(json)
+                    body: JSON.stringify({ ...json, db: activeVirtualDb })
                 });
                 const d = await res.json();
                 if (d.success) {
@@ -883,7 +905,7 @@ function initInsertModal() {
             const res = await fetch('/api/key', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key, type, value: parsed, ttl })
+                body: JSON.stringify({ key, type, value: parsed, ttl, db: activeVirtualDb })
             });
             const data = await res.json();
             if (data.success) {
@@ -937,13 +959,19 @@ function initLiveSync() {
 
 async function fetchStats() {
     try {
-        const res = await fetch('/api/stats');
+        const endpoint = `/api/stats${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`;
+        const res = await fetch(endpoint);
         if (!res.ok) return;
         const stats = await res.json();
 
         document.getElementById('sbMemory').textContent = stats.used_memory_human || '0 B';
-        document.getElementById('sbCommands').textContent = stats.total_commands_processed || 0;
+        document.getElementById('sbCommands').textContent = (stats.total_commands_processed || 0).toLocaleString();
         document.getElementById('sbUptime').textContent = formatUptimeShort(stats.uptime_in_seconds);
+
+        if (stats.databases) {
+            databasesCache = stats.databases;
+            updateVirtualDatabaseSelector(databasesCache, stats.activeDb);
+        }
     } catch (ignored) {}
 }
 
@@ -1353,5 +1381,514 @@ async function runBenchmarkTest() {
         startBtn.disabled = false;
         startBtn.innerHTML = '<iconify-icon icon="lucide:zap" width="16"></iconify-icon> Start Stress Test';
     }
+}
+
+// ==========================================
+// Virtual Database Selector (Multi-Tenant Isolation)
+// ==========================================
+function initVirtualDatabaseSelector() {
+    const sel = document.getElementById('vdbSelect');
+    if (!sel) return;
+
+    sel.addEventListener('change', (e) => {
+        switchVirtualDatabase(e.target.value);
+    });
+}
+
+function switchVirtualDatabase(dbName) {
+    activeVirtualDb = dbName || 'default';
+    const pill = document.getElementById('sbActiveDbPill');
+    const displayDb = activeVirtualDb === 'default' ? 'db0' : activeVirtualDb;
+    if (pill) pill.textContent = displayDb;
+
+    const sel = document.getElementById('vdbSelect');
+    if (sel && sel.value !== activeVirtualDb) {
+        sel.value = activeVirtualDb;
+    }
+
+    const statActive = document.getElementById('statActiveTenantName');
+    if (statActive) {
+        statActive.textContent = displayDb;
+    }
+
+    currentPage = 1;
+    selectedKeys.clear();
+    updateBatchBar();
+    fetchKeys();
+    fetchStats();
+    showToast(`Switched active database to ${displayDb}`);
+}
+
+function updateVirtualDatabaseSelector(databases, activeDb) {
+    const sel = document.getElementById('vdbSelect');
+    if (!sel) return;
+
+    const knownDbs = new Set(['default']);
+    let optionsHtml = `<option value="default">db0 (Default Root)</option>`;
+    if (databases && Array.isArray(databases)) {
+        databases.forEach(db => {
+            const val = db.dbName || db.tenant;
+            if (val && val !== 'default' && val !== 'admin' && val !== 'db0') {
+                knownDbs.add(val);
+                optionsHtml += `<option value="${escapeHtml(val)}">${escapeHtml(val)} (${db.keyCount || 0} keys)</option>`;
+            }
+        });
+    }
+
+    sel.innerHTML = optionsHtml;
+    if (knownDbs.has(activeVirtualDb)) {
+        sel.value = activeVirtualDb;
+    } else {
+        sel.value = 'default';
+        activeVirtualDb = 'default';
+    }
+}
+
+// ==========================================
+// Accounts & Virtual DBs Studio Panel
+// ==========================================
+function initTenantsPanel() {
+    const toggleFormBtn = document.getElementById('toggleCreateTenantFormBtn');
+    const formCard = document.getElementById('tenantCreationCard');
+    const closeFormBtn = document.getElementById('closeTenantFormBtn');
+    const cancelFormBtn = document.getElementById('cancelTenantFormBtn');
+    const createForm = document.getElementById('createTenantForm');
+    const refreshBtn = document.getElementById('refreshTenantsBtn');
+    const usernameInput = document.getElementById('tenantUsernameInput');
+    const previewSpan = document.getElementById('vdbPreviewName');
+
+    if (toggleFormBtn && formCard) {
+        toggleFormBtn.addEventListener('click', () => {
+            formCard.style.display = formCard.style.display === 'none' ? 'block' : 'none';
+            if (formCard.style.display === 'block') {
+                usernameInput.focus();
+            }
+        });
+    }
+
+    if (closeFormBtn && formCard) {
+        closeFormBtn.addEventListener('click', () => formCard.style.display = 'none');
+    }
+    if (cancelFormBtn && formCard) {
+        cancelFormBtn.addEventListener('click', () => formCard.style.display = 'none');
+    }
+
+    if (usernameInput && previewSpan) {
+        usernameInput.addEventListener('input', () => {
+            const u = usernameInput.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+            previewSpan.textContent = u ? `vdb_${u}` : 'vdb_...';
+        });
+    }
+
+    if (createForm) {
+        createForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const submitBtn = document.getElementById('submitTenantFormBtn');
+            const username = usernameInput.value.trim();
+            const password = document.getElementById('tenantPasswordInput').value.trim();
+            const token = document.getElementById('tenantTokenInput').value.trim();
+
+            if (!username) {
+                showToast('Username is required', true);
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<div class="studio-spinner" style="width: 14px; height: 14px; border-width: 2px;"></div> Provisioning...';
+
+            try {
+                const res = await fetch('/api/tenants', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, token })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    throw new Error(data.error || 'Failed to create tenant');
+                }
+
+                showToast(`Provisioned account "${username}" with virtual database!`);
+                formCard.style.display = 'none';
+                createForm.reset();
+                if (previewSpan) previewSpan.textContent = 'vdb_...';
+
+                await loadTenants();
+                await fetchStats();
+
+                // Open Connect modal pre-selected for this new user!
+                openConnectModal(username);
+            } catch (err) {
+                showToast(err.message, true);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<iconify-icon icon="lucide:plus" width="14"></iconify-icon> Provision Account & Virtual Database';
+            }
+        });
+    }
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            loadTenants();
+            showToast('Tenants list updated');
+        });
+    }
+}
+
+async function loadTenants() {
+    const container = document.getElementById('tenantsCardsContainer');
+    if (!container) return;
+
+    try {
+        const res = await fetch('/api/tenants');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        tenantsCache = data.tenants || [];
+        databasesCache = data.databases || [];
+
+        // Update stats
+        const badge = document.getElementById('tenantCountBadge');
+        if (badge) badge.textContent = tenantsCache.length;
+        const statTenant = document.getElementById('statTenantCount');
+        if (statTenant) statTenant.textContent = tenantsCache.length;
+        const statVdb = document.getElementById('statVdbCount');
+        if (statVdb) statVdb.textContent = databasesCache.length;
+
+        updateVirtualDatabaseSelector(databasesCache, activeVirtualDb);
+
+        if (tenantsCache.length === 0) {
+            container.innerHTML = `<div class="empty-state">No tenant accounts found. Click "New Tenant Account" to provision your first virtual database.</div>`;
+            return;
+        }
+
+        container.innerHTML = tenantsCache.map(u => {
+            const urls = u.connectionUrls || {};
+            const isCurrentActive = (activeVirtualDb === u.virtualDb) || (u.username === 'admin' && activeVirtualDb === 'default');
+            const initial = (u.username[0] || 'U').toUpperCase();
+
+            return `
+                <div class="tenant-card ${isCurrentActive ? 'active-db' : ''}" data-username="${escapeHtml(u.username)}">
+                    <div class="tenant-card-head">
+                        <div class="tenant-user-info">
+                            <div class="tenant-avatar">${initial}</div>
+                            <div class="tenant-name-wrap">
+                                <span class="tenant-name">
+                                    ${escapeHtml(u.username)}
+                                    ${isCurrentActive ? '<span class="badge-type" style="background:#2563eb; color:#fff; font-size:0.65rem;">Active in Studio</span>' : ''}
+                                </span>
+                                <span class="tenant-db-tag">${escapeHtml(u.virtualDb || 'db0')}</span>
+                            </div>
+                        </div>
+                        <div class="tenant-badges-row">
+                            <span class="role-badge ${u.role}">${escapeHtml(u.role)}</span>
+                        </div>
+                    </div>
+
+                    <div class="tenant-stats-row">
+                        <div class="tenant-stat-col">
+                            <span class="lbl">Keys Count</span>
+                            <span class="val">${(u.keyCount || 0).toLocaleString()}</span>
+                        </div>
+                        <div class="tenant-stat-col">
+                            <span class="lbl">Memory Allocated</span>
+                            <span class="val">${escapeHtml(u.memoryHuman || '0 B')}</span>
+                        </div>
+                        <div class="tenant-stat-col">
+                            <span class="lbl">RLS Scope</span>
+                            <span class="val" style="color: #34d399;">${(u.keyPatterns && u.keyPatterns[0]) || '*'}</span>
+                        </div>
+                    </div>
+
+                    <div class="tenant-url-block">
+                        <div class="url-copy-field">
+                            <span class="prefix">Redis URL</span>
+                            <code title="${escapeHtml(urls.redisUrl || '')}">${escapeHtml(urls.redisUrl || '')}</code>
+                            <button class="btn-icon-copy" onclick="copyToClipboard('${escapeHtml(urls.redisUrl || '')}', 'Copied Redis URL!')" title="Copy Redis URL">
+                                <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
+                            </button>
+                        </div>
+                        <div class="url-copy-field">
+                            <span class="prefix">API Token</span>
+                            <code title="${escapeHtml(u.apiToken || '')}">${escapeHtml(u.apiToken || '')}</code>
+                            <button class="btn-icon-copy" onclick="copyToClipboard('${escapeHtml(u.apiToken || '')}', 'Copied API Token!')" title="Copy Token">
+                                <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="tenant-card-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="openConnectModal('${escapeHtml(u.username)}')">
+                            <iconify-icon icon="lucide:link-2" width="13"></iconify-icon>
+                            Connect Snippets
+                        </button>
+                        <button class="btn ${isCurrentActive ? 'btn-secondary' : 'btn-primary'} btn-sm" onclick="switchVirtualDatabase('${escapeHtml(u.virtualDb || 'default')}')">
+                            <iconify-icon icon="lucide:database" width="13"></iconify-icon>
+                            ${isCurrentActive ? 'Currently Browsing' : 'Switch Studio DB'}
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    } catch (e) {
+        container.innerHTML = `<div style="color: #ff4757; font-size: 0.85rem;">Failed to load accounts: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+// ==========================================
+// Connect to Redis Modal (Prisma, ioredis, CLI, REST)
+// ==========================================
+function initConnectModal() {
+    const modal = document.getElementById('connectModal');
+    const openBtn = document.getElementById('openConnectModalBtn');
+    const closeBtn1 = document.getElementById('closeConnectModalBtn');
+    const closeBtn2 = document.getElementById('closeConnectModalBtn2');
+    const tenantSelect = document.getElementById('connectAccountSelect');
+    const tabs = document.querySelectorAll('.connect-tab');
+    const copySnippetBtn = document.getElementById('copySnippetBtn');
+    const copyRedisUrlBtn = document.getElementById('copyConnRedisUrlBtn');
+    const copyTokenUrlBtn = document.getElementById('copyConnTokenUrlBtn');
+
+    if (openBtn) {
+        openBtn.addEventListener('click', () => openConnectModal());
+    }
+    if (closeBtn1) closeBtn1.addEventListener('click', closeConnectModal);
+    if (closeBtn2) closeBtn2.addEventListener('click', closeConnectModal);
+
+    if (tenantSelect) {
+        tenantSelect.addEventListener('change', (e) => {
+            activeConnectTenantUsername = e.target.value;
+            renderConnectDetails();
+        });
+    }
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            activeConnectTab = tab.dataset.tab;
+            renderConnectSnippet();
+        });
+    });
+
+    if (copySnippetBtn) {
+        copySnippetBtn.addEventListener('click', () => {
+            const code = document.getElementById('connectSnippetCode').textContent;
+            copyToClipboard(code, 'Copied code snippet!');
+        });
+    }
+
+    if (copyRedisUrlBtn) {
+        copyRedisUrlBtn.addEventListener('click', () => {
+            const url = document.getElementById('connRedisUrlInput').value;
+            copyToClipboard(url, 'Copied Redis URL!');
+        });
+    }
+
+    if (copyTokenUrlBtn) {
+        copyTokenUrlBtn.addEventListener('click', () => {
+            const url = document.getElementById('connTokenUrlInput').value;
+            copyToClipboard(url, 'Copied Token URL!');
+        });
+    }
+}
+
+async function openConnectModal(preferredUsername) {
+    const modal = document.getElementById('connectModal');
+    if (!modal) return;
+
+    if (tenantsCache.length === 0) {
+        try {
+            const res = await fetch('/api/tenants');
+            if (res.ok) {
+                const data = await res.json();
+                tenantsCache = data.tenants || [];
+            }
+        } catch (ignored) {}
+    }
+
+    const select = document.getElementById('connectAccountSelect');
+    if (select && tenantsCache.length > 0) {
+        select.innerHTML = tenantsCache.map(u => `
+            <option value="${escapeHtml(u.username)}">${escapeHtml(u.username)} (${escapeHtml(u.virtualDb || 'db0')}) - ${escapeHtml(u.role)}</option>
+        `).join('');
+
+        if (preferredUsername && tenantsCache.some(u => u.username === preferredUsername)) {
+            activeConnectTenantUsername = preferredUsername;
+            select.value = preferredUsername;
+        } else if (activeVirtualDb && activeVirtualDb !== 'default') {
+            const match = tenantsCache.find(u => u.virtualDb === activeVirtualDb);
+            if (match) {
+                activeConnectTenantUsername = match.username;
+                select.value = match.username;
+            } else {
+                activeConnectTenantUsername = tenantsCache[0].username;
+                select.value = activeConnectTenantUsername;
+            }
+        } else {
+            activeConnectTenantUsername = select.value || 'admin';
+        }
+    }
+
+    renderConnectDetails();
+    modal.classList.add('open');
+}
+
+function closeConnectModal() {
+    const modal = document.getElementById('connectModal');
+    if (modal) modal.classList.remove('open');
+}
+
+function renderConnectDetails() {
+    const user = tenantsCache.find(u => u.username === activeConnectTenantUsername) || (tenantsCache[0] || {
+        username: 'admin',
+        password: 'redis_admin_secret',
+        apiToken: 'tok_admin_live_secret',
+        virtualDb: 'db0',
+        connectionUrls: {
+            redisUrl: 'redis://admin:redis_admin_secret@localhost:6379',
+            tokenUrl: 'redis://:tok_admin_live_secret@localhost:6379',
+            restUrl: 'http://localhost:8080/v1'
+        }
+    });
+
+    const host = window.location.hostname || 'localhost';
+    const redisPort = 6379;
+    const webPort = window.location.port || 8080;
+    const stdUrl = `redis://${user.username}:${user.password}@${host}:${redisPort}`;
+    const tokUrl = `redis://:${user.apiToken}@${host}:${redisPort}`;
+
+    const redisInput = document.getElementById('connRedisUrlInput');
+    const tokenInput = document.getElementById('connTokenUrlInput');
+    if (redisInput) redisInput.value = stdUrl;
+    if (tokenInput) tokenInput.value = tokUrl;
+
+    renderConnectSnippet(user, stdUrl, tokUrl, host, redisPort, webPort);
+}
+
+function renderConnectSnippet(user, stdUrl, tokUrl, host, redisPort, webPort) {
+    if (!user) {
+        user = tenantsCache.find(u => u.username === activeConnectTenantUsername) || {};
+    }
+    if (!stdUrl) {
+        const h = window.location.hostname || 'localhost';
+        stdUrl = `redis://${user.username || 'admin'}:${user.password || 'password'}@${h}:6379`;
+        tokUrl = `redis://:${user.apiToken || 'token'}@${h}:6379`;
+        host = h;
+        redisPort = 6379;
+        webPort = window.location.port || 8080;
+    }
+
+    const titleEl = document.getElementById('snippetLanguageTitle');
+    const codeEl = document.getElementById('connectSnippetCode');
+    if (!codeEl) return;
+
+    let code = '';
+    let title = '';
+
+    switch (activeConnectTab) {
+        case 'prisma':
+            title = 'schema.prisma & .env Integration';
+            code = `// 1. In your .env file:
+DATABASE_URL="${stdUrl}"
+
+// 2. In your schema.prisma file:
+datasource db {
+  provider = "redis"
+  url      = env("DATABASE_URL")
+}
+
+// In your application code:
+import { PrismaClient } from '@prisma/client'
+const prisma = new PrismaClient()
+
+// Direct Redis caching / session commands run inside isolated database: ${user.virtualDb || 'vdb_' + user.username}`;
+            break;
+
+        case 'ioredis':
+            title = 'Node.js (ioredis / Express / BullMQ)';
+            code = `import Redis from 'ioredis';
+
+// Connect using standard URL with auto-auth and tenant isolation:
+const redis = new Redis("${stdUrl}");
+
+// Or connect using Single-Token URL:
+// const redis = new Redis("${tokUrl}");
+
+await redis.set("user:session:token", "jwt_active_session_456", "EX", 3600);
+const session = await redis.get("user:session:token");
+console.log("Cached Session:", session);
+
+// Disconnect on app shutdown
+// await redis.quit();`;
+            break;
+
+        case 'python':
+            title = 'Python (redis-py / FastAPI / Django)';
+            code = `import redis
+
+# Connect to isolated virtual database (${user.virtualDb || 'vdb_' + user.username})
+r = redis.from_url("${stdUrl}")
+
+# Test connection & write key
+r.set("python:demo:key", "Hello from Python Redis Client", ex=600)
+val = r.get("python:demo:key")
+print("Retrieved:", val.decode("utf-8"))
+
+# Hash operations
+r.hset("user:101", mapping={"name": "Alice", "role": "engineer"})
+print("Hash Data:", r.hgetall("user:101"))`;
+            break;
+
+        case 'cli':
+            title = 'Official Redis CLI';
+            code = `# 1. Connect directly using connection URL
+redis-cli -u ${stdUrl}
+
+# 2. Or connect and authenticate manually:
+redis-cli -h ${host} -p ${redisPort} -a ${user.password || user.apiToken}
+
+# Verify isolated database:
+127.0.0.1:6379> PING
+PONG
+127.0.0.1:6379> SET status "online"
+OK`;
+            break;
+
+        case 'rest':
+            title = 'Serverless Cloud Edge REST API (Upstash KV format)';
+            code = `// .env.local
+UPSTASH_REDIS_REST_URL="http://${host}:${webPort}/v1"
+UPSTASH_REDIS_REST_TOKEN="${user.apiToken || 'red_api_...'}"
+
+// cURL test:
+curl -X POST http://${host}:${webPort}/v1/set \\
+  -H "Authorization: Bearer ${user.apiToken || 'red_api_...'}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"key": "cloud:item", "value": "Stored over HTTP REST at the Edge"}'
+
+// cURL get:
+curl http://${host}:${webPort}/v1/get/cloud%3Aitem \\
+  -H "Authorization: Bearer ${user.apiToken || 'red_api_...'}"`;
+            break;
+    }
+
+    if (titleEl) titleEl.textContent = title;
+    codeEl.textContent = code;
+}
+
+function copyToClipboard(text, successMsg = 'Copied to clipboard!') {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        showToast(successMsg);
+    }).catch(() => {
+        // Fallback
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast(successMsg);
+    });
 }
 
