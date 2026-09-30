@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  redis-cloud:
+    build: .
+    container_name: redis-java-server
+    ports:
+      - "6379:6379"   # Standard Redis TCP protocol port
+      - "8080:8080"   # Management Web Dashboard & REST API
+    environment:
+      - REDIS_HOST=0.0.0.0
+      - REDIS_PORT=6379
+      - WEB_PORT=8080
+      - AOF_ENABLED=true
+      - AOF_PATH=/app/data/appendonly.aof
+      - EXPIRY_INTERVAL_MS=200
+    volumes:
+      - redis-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+    driver: local
