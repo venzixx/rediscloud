@@ -8,6 +8,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Iconify Script -->
+    <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
 </head>
 <body class="studio-theme">
     <div class="studio-layout">
@@ -16,11 +18,7 @@
             <div class="sidebar-header">
                 <div class="brand">
                     <div class="logo-box">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                            <polyline points="2 17 12 22 22 17"></polyline>
-                            <polyline points="2 12 12 17 22 12"></polyline>
-                        </svg>
+                        <iconify-icon icon="logos:redis" width="22" height="22"></iconify-icon>
                     </div>
                     <div class="brand-info">
                         <span class="brand-title">Redis<span class="red-text">Studio</span></span>
@@ -43,27 +41,27 @@
                 <span class="section-label">DATA VIEWS</span>
                 <nav class="nav-tree">
                     <button class="nav-item active" data-type-filter="ALL">
-                        <span class="nav-icon">📑</span>
+                        <iconify-icon icon="lucide:layout-grid" class="nav-icon" width="16"></iconify-icon>
                         <span class="nav-text">All Records</span>
                         <span class="nav-count" id="countAll">-</span>
                     </button>
                     <button class="nav-item" data-type-filter="string">
-                        <span class="nav-icon type-icon str">🔤</span>
+                        <iconify-icon icon="lucide:type" class="nav-icon str" width="16"></iconify-icon>
                         <span class="nav-text">Strings</span>
                         <span class="nav-count" id="countStrings">-</span>
                     </button>
                     <button class="nav-item" data-type-filter="hash">
-                        <span class="nav-icon type-icon hsh">🗃️</span>
+                        <iconify-icon icon="lucide:boxes" class="nav-icon hsh" width="16"></iconify-icon>
                         <span class="nav-text">Hashes</span>
                         <span class="nav-count" id="countHashes">-</span>
                     </button>
                     <button class="nav-item" data-type-filter="list">
-                        <span class="nav-icon type-icon lst">📋</span>
+                        <iconify-icon icon="lucide:list-ordered" class="nav-icon lst" width="16"></iconify-icon>
                         <span class="nav-text">Lists</span>
                         <span class="nav-count" id="countLists">-</span>
                     </button>
                     <button class="nav-item" data-type-filter="set">
-                        <span class="nav-icon type-icon st">🎯</span>
+                        <iconify-icon icon="lucide:shapes" class="nav-icon st" width="16"></iconify-icon>
                         <span class="nav-text">Sets</span>
                         <span class="nav-count" id="countSets">-</span>
                     </button>
@@ -74,7 +72,9 @@
             <div class="sidebar-section">
                 <div class="section-label-row">
                     <span class="section-label">NAMESPACES</span>
-                    <span class="namespace-refresh" id="refreshNamespacesBtn" title="Scan namespaces">↻</span>
+                    <span class="namespace-refresh" id="refreshNamespacesBtn" title="Scan namespaces">
+                        <iconify-icon icon="lucide:rotate-cw" width="13"></iconify-icon>
+                    </span>
                 </div>
                 <div class="namespace-list" id="namespaceTreeList">
                     <!-- Populated dynamically (e.g. user:, devops:, active:) -->
@@ -87,16 +87,16 @@
                 <span class="section-label">TOOLS & UTILITIES</span>
                 <nav class="nav-tree">
                     <button class="nav-item" id="exportDataBtn">
-                        <span class="nav-icon">💾</span>
+                        <iconify-icon icon="lucide:download" class="nav-icon" width="16"></iconify-icon>
                         <span class="nav-text">Export JSON</span>
                     </button>
                     <button class="nav-item" id="importDataBtn">
-                        <span class="nav-icon">📥</span>
+                        <iconify-icon icon="lucide:upload" class="nav-icon" width="16"></iconify-icon>
                         <span class="nav-text">Import JSON</span>
                         <input type="file" id="importFileInput" accept=".json" style="display: none;">
                     </button>
                     <button class="nav-item danger" id="flushDbBtn">
-                        <span class="nav-icon">🗑️</span>
+                        <iconify-icon icon="lucide:trash-2" class="nav-icon" width="16"></iconify-icon>
                         <span class="nav-text">Flush Database</span>
                     </button>
                 </nav>
@@ -110,7 +110,7 @@
                         <span class="val" id="sbMemory">-</span>
                     </div>
                     <div class="telemetry-item">
-                        <span class="label">Ops/sec</span>
+                        <span class="label">Commands</span>
                         <span class="val" id="sbCommands">-</span>
                     </div>
                     <div class="telemetry-item">
@@ -126,7 +126,10 @@
             <!-- Top App Bar -->
             <header class="top-bar">
                 <div class="breadcrumb-container">
-                    <span class="bc-crumb">Databases</span>
+                    <span class="bc-crumb">
+                        <iconify-icon icon="lucide:database" width="14" style="vertical-align: middle;"></iconify-icon>
+                        Databases
+                    </span>
                     <span class="bc-sep">/</span>
                     <span class="bc-crumb">db0</span>
                     <span class="bc-sep">/</span>
@@ -143,17 +146,17 @@
                     </div>
 
                     <button class="btn btn-secondary btn-sm" id="manualRefreshBtn">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                        <iconify-icon icon="lucide:rotate-cw" width="14"></iconify-icon>
                         Refresh
                     </button>
 
                     <button class="btn btn-secondary btn-sm" id="toggleTerminalBtn">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                        <iconify-icon icon="lucide:terminal" width="14"></iconify-icon>
                         Terminal CLI
                     </button>
 
                     <button class="btn btn-primary btn-sm" id="openInsertModalBtn">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        <iconify-icon icon="lucide:plus" width="15"></iconify-icon>
                         Insert Record
                     </button>
                 </div>
@@ -162,7 +165,7 @@
             <!-- Datasheet Toolbar -->
             <div class="datasheet-toolbar">
                 <div class="search-box">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <iconify-icon icon="lucide:search" width="15"></iconify-icon>
                     <input type="text" id="filterSearchInput" placeholder="Filter by key name, prefix, or glob (e.g. user:*)...">
                 </div>
 
@@ -181,7 +184,10 @@
                 <!-- Batch Selection Actions Bar (hidden by default) -->
                 <div class="batch-bar" id="batchActionBar">
                     <span class="batch-count" id="batchCountText">0 selected</span>
-                    <button class="btn btn-outline-danger btn-sm" id="batchDeleteBtn">Delete Selected</button>
+                    <button class="btn btn-outline-danger btn-sm" id="batchDeleteBtn">
+                        <iconify-icon icon="lucide:trash-2" width="13"></iconify-icon>
+                        Delete Selected
+                    </button>
                     <button class="btn btn-secondary btn-sm" id="batchCancelBtn">Deselect</button>
                 </div>
             </div>
@@ -219,6 +225,7 @@
                 <div class="terminal-drawer-header">
                     <div class="td-left">
                         <span class="td-dot online"></span>
+                        <iconify-icon icon="lucide:terminal" width="15" style="color: #38bdf8;"></iconify-icon>
                         <span class="td-title">Redis Interactive Terminal (Port 6379)</span>
                     </div>
                     <div class="td-shortcuts">
@@ -229,8 +236,12 @@
                         <button class="chip" onclick="clearCliTerminal()">Clear</button>
                     </div>
                     <div class="td-controls">
-                        <button class="drawer-btn" id="drawerExpandBtn" title="Toggle size">🗖</button>
-                        <button class="drawer-btn" id="drawerCloseBtn" title="Close drawer">&times;</button>
+                        <button class="drawer-btn" id="drawerExpandBtn" title="Toggle size">
+                            <iconify-icon icon="lucide:maximize-2" width="14"></iconify-icon>
+                        </button>
+                        <button class="drawer-btn" id="drawerCloseBtn" title="Close drawer">
+                            <iconify-icon icon="lucide:x" width="16"></iconify-icon>
+                        </button>
                     </div>
                 </div>
 
@@ -243,7 +254,10 @@
                 <form class="terminal-drawer-input-row" id="drawerForm">
                     <span class="term-prompt">redis-cli&gt;</span>
                     <input type="text" id="drawerInput" placeholder="Execute command (e.g. SET user:name 'Alice' EX 300)..." autocomplete="off" spellcheck="false">
-                    <button type="submit" class="btn btn-primary btn-sm">Execute</button>
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <iconify-icon icon="lucide:corner-down-left" width="13"></iconify-icon>
+                        Execute
+                    </button>
                 </form>
             </div>
         </div>
@@ -255,21 +269,32 @@
                     <span class="badge-type" id="inspTypeBadge">STRING</span>
                     <h3 class="inspector-key-title" id="inspKeyTitle">key:name</h3>
                 </div>
-                <button class="close-inspector-btn" id="closeInspectorBtn">&times;</button>
+                <button class="close-inspector-btn" id="closeInspectorBtn">
+                    <iconify-icon icon="lucide:x" width="18"></iconify-icon>
+                </button>
             </div>
 
             <div class="inspector-body">
                 <div class="inspector-meta-card">
                     <div class="meta-field">
-                        <span class="lbl">Storage Type</span>
+                        <span class="lbl">
+                            <iconify-icon icon="lucide:database" width="11"></iconify-icon>
+                            Storage Type
+                        </span>
                         <span class="val" id="inspMetaType">String</span>
                     </div>
                     <div class="meta-field">
-                        <span class="lbl">Memory Size</span>
+                        <span class="lbl">
+                            <iconify-icon icon="lucide:hard-drive" width="11"></iconify-icon>
+                            Memory Size
+                        </span>
                         <span class="val" id="inspMetaSize">0 bytes</span>
                     </div>
                     <div class="meta-field">
-                        <span class="lbl">TTL Expiry</span>
+                        <span class="lbl">
+                            <iconify-icon icon="lucide:clock-9" width="11"></iconify-icon>
+                            TTL Expiry
+                        </span>
                         <span class="val" id="inspMetaTtl">No Expiration (-1)</span>
                     </div>
                 </div>
@@ -292,17 +317,29 @@
                     <label class="section-lbl">UPDATE EXPIRATION (TTL)</label>
                     <div class="ttl-input-group">
                         <input type="number" id="inspTtlSeconds" class="studio-input" placeholder="Seconds (0 or blank = persistent)">
-                        <button class="btn btn-secondary btn-sm" id="inspSetTtlBtn">Set TTL</button>
-                        <button class="btn btn-secondary btn-sm" id="inspPersistBtn">Persist</button>
+                        <button class="btn btn-secondary btn-sm" id="inspSetTtlBtn">
+                            <iconify-icon icon="lucide:clock" width="13"></iconify-icon>
+                            Set TTL
+                        </button>
+                        <button class="btn btn-secondary btn-sm" id="inspPersistBtn">
+                            <iconify-icon icon="lucide:infinity" width="13"></iconify-icon>
+                            Persist
+                        </button>
                     </div>
                 </div>
             </div>
 
             <div class="inspector-footer">
-                <button class="btn btn-outline-danger btn-sm" id="inspDeleteRecordBtn">Delete Key</button>
+                <button class="btn btn-outline-danger btn-sm" id="inspDeleteRecordBtn">
+                    <iconify-icon icon="lucide:trash-2" width="13"></iconify-icon>
+                    Delete Key
+                </button>
                 <div class="footer-actions">
                     <button class="btn btn-secondary btn-sm" id="inspCancelBtn">Close</button>
-                    <button class="btn btn-primary btn-sm" id="inspSaveRecordBtn">Save Changes</button>
+                    <button class="btn btn-primary btn-sm" id="inspSaveRecordBtn">
+                        <iconify-icon icon="lucide:check" width="14"></iconify-icon>
+                        Save Changes
+                    </button>
                 </div>
             </div>
         </aside>
@@ -312,8 +349,13 @@
     <div class="modal-backdrop" id="insertModal">
         <div class="modal-dialog">
             <div class="modal-header">
-                <h3 class="modal-title">Insert New Redis Record</h3>
-                <button class="modal-close" onclick="closeInsertModal()">&times;</button>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <iconify-icon icon="lucide:plus-circle" width="18" style="color: var(--brand-red);"></iconify-icon>
+                    <h3 class="modal-title">Insert New Redis Record</h3>
+                </div>
+                <button class="modal-close" onclick="closeInsertModal()">
+                    <iconify-icon icon="lucide:x" width="18"></iconify-icon>
+                </button>
             </div>
             <div class="modal-body">
                 <div class="studio-form-group">
@@ -345,7 +387,10 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeInsertModal()">Cancel</button>
-                <button class="btn btn-primary" id="insSubmitBtn">Save Record</button>
+                <button class="btn btn-primary" id="insSubmitBtn">
+                    <iconify-icon icon="lucide:check" width="14"></iconify-icon>
+                    Save Record
+                </button>
             </div>
         </div>
     </div>

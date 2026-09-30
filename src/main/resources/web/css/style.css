@@ -240,11 +240,17 @@ body.studio-theme {
 }
 
 .nav-icon {
-    font-size: 0.95rem;
-    width: 16px;
+    font-size: 1rem;
+    width: 18px;
+    height: 18px;
     display: inline-flex;
+    align-items: center;
     justify-content: center;
 }
+.nav-icon.str { color: var(--accent-blue); }
+.nav-icon.hsh { color: var(--accent-purple); }
+.nav-icon.lst { color: var(--accent-amber); }
+.nav-icon.st  { color: var(--accent-green); }
 
 .nav-text {
     flex: 1;

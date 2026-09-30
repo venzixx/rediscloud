@@ -219,7 +219,7 @@ function buildNamespaceTree(keys) {
     entries.sort((a, b) => a[0].localeCompare(b[0]));
     host.innerHTML = entries.map(([ns, count]) => `
         <div class="tree-folder ${activeNamespace === ns ? 'active' : ''}" data-ns="${escapeHtml(ns)}">
-            <span class="f-icon">📁</span>
+            <iconify-icon icon="lucide:folder" class="f-icon" width="13"></iconify-icon>
             <span class="f-name">${escapeHtml(ns)}</span>
             <span class="f-count">${count}</span>
         </div>
@@ -292,9 +292,12 @@ function renderTableRows() {
             <tr>
                 <td colspan="8" class="table-empty">
                     <div class="empty-state">
-                        <span style="font-size: 2rem;">📭</span>
+                        <iconify-icon icon="lucide:database-zap" width="36" height="36" style="color: var(--text-dim);"></iconify-icon>
                         <p>No records matching query.</p>
-                        <button class="btn btn-primary btn-sm" onclick="openInsertModal()">+ Insert Record</button>
+                        <button class="btn btn-primary btn-sm" onclick="openInsertModal()">
+                            <iconify-icon icon="lucide:plus" width="13"></iconify-icon>
+                            Insert Record
+                        </button>
                     </div>
                 </td>
             </tr>
@@ -328,11 +331,17 @@ function renderTableRows() {
                 </td>
                 <td class="col-size">${sizeLabel}</td>
                 <td class="col-ttl">
-                    <span class="ttl-text ${ttlClass}">⏱️ ${ttlLabel}</span>
+                    <span class="ttl-text ${ttlClass}">
+                        <iconify-icon icon="lucide:clock" width="12" style="vertical-align: middle; margin-right: 3px;"></iconify-icon>${ttlLabel}
+                    </span>
                 </td>
                 <td class="col-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="openInspector('${escapeHtml(k.key)}')">Inspect</button>
-                    <button class="btn btn-outline-danger btn-sm" onclick="quickDeleteKey('${escapeHtml(k.key)}')" title="Delete">&times;</button>
+                    <button class="btn btn-secondary btn-sm" onclick="openInspector('${escapeHtml(k.key)}')" title="Inspect / Edit">
+                        <iconify-icon icon="lucide:eye" width="12"></iconify-icon>
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="quickDeleteKey('${escapeHtml(k.key)}')" title="Delete" style="margin-left: 2px;">
+                        <iconify-icon icon="lucide:trash-2" width="12"></iconify-icon>
+                    </button>
                 </td>
             </tr>
         `;
@@ -517,7 +526,7 @@ function renderInspectorContent(details) {
     tools.innerHTML = '';
 
     if (details.type === 'string') {
-        tools.innerHTML = `<button class="chip" id="fmtJsonBtn">Format JSON</button>`;
+        tools.innerHTML = `<button class="chip" id="fmtJsonBtn"><iconify-icon icon="lucide:code-2" width="12" style="vertical-align: middle;"></iconify-icon> Format JSON</button>`;
         host.innerHTML = `<textarea id="inspTextValue" class="editor-textarea">${escapeHtml(details.value)}</textarea>`;
 
         document.getElementById('fmtJsonBtn')?.addEventListener('click', () => {
@@ -532,7 +541,7 @@ function renderInspectorContent(details) {
         });
 
     } else if (details.type === 'hash') {
-        tools.innerHTML = `<button class="chip" id="addHashFieldBtn">+ Add Field</button>`;
+        tools.innerHTML = `<button class="chip" id="addHashFieldBtn"><iconify-icon icon="lucide:plus" width="12" style="vertical-align: middle;"></iconify-icon> Add Field</button>`;
         const entries = Object.entries(details.value || {});
         let html = '<table class="hash-table-editor"><thead><tr><th>Field</th><th>Value</th><th style="width:30px;"></th></tr></thead><tbody>';
         entries.forEach(([f, v]) => {
@@ -540,7 +549,7 @@ function renderInspectorContent(details) {
                 <tr>
                     <td><input type="text" class="hash-input hash-f-name" value="${escapeHtml(f)}"></td>
                     <td><input type="text" class="hash-input hash-f-val" value="${escapeHtml(v)}"></td>
-                    <td><button class="drawer-btn" onclick="this.closest('tr').remove()">&times;</button></td>
+                    <td><button class="drawer-btn" onclick="this.closest('tr').remove()"><iconify-icon icon="lucide:trash-2" width="13"></iconify-icon></button></td>
                 </tr>
             `;
         });
@@ -553,14 +562,14 @@ function renderInspectorContent(details) {
             tr.innerHTML = `
                 <td><input type="text" class="hash-input hash-f-name" placeholder="new_field"></td>
                 <td><input type="text" class="hash-input hash-f-val" placeholder="value"></td>
-                <td><button class="drawer-btn" onclick="this.closest('tr').remove()">&times;</button></td>
+                <td><button class="drawer-btn" onclick="this.closest('tr').remove()"><iconify-icon icon="lucide:trash-2" width="13"></iconify-icon></button></td>
             `;
             tbody.appendChild(tr);
         });
 
     } else if (details.type === 'list' || details.type === 'set') {
         const isList = details.type === 'list';
-        tools.innerHTML = `<button class="chip" id="addListItemBtn">+ Append ${isList ? 'Item' : 'Member'}</button>`;
+        tools.innerHTML = `<button class="chip" id="addListItemBtn"><iconify-icon icon="lucide:plus" width="12" style="vertical-align: middle;"></iconify-icon> Append ${isList ? 'Item' : 'Member'}</button>`;
         const items = details.value || [];
         let html = '<div class="list-editor-container" style="max-height: 280px; overflow-y: auto;">';
         items.forEach((item, idx) => {
@@ -568,7 +577,7 @@ function renderInspectorContent(details) {
                 <div class="list-item-row">
                     <span class="list-idx">${idx + 1}.</span>
                     <input type="text" class="list-val-input" value="${escapeHtml(item)}">
-                    <button class="drawer-btn" onclick="this.closest('.list-item-row').remove()">&times;</button>
+                    <button class="drawer-btn" onclick="this.closest('.list-item-row').remove()"><iconify-icon icon="lucide:trash-2" width="13"></iconify-icon></button>
                 </div>
             `;
         });
@@ -583,7 +592,7 @@ function renderInspectorContent(details) {
             row.innerHTML = `
                 <span class="list-idx">${count}.</span>
                 <input type="text" class="list-val-input" placeholder="New ${isList ? 'element' : 'member'}">
-                <button class="drawer-btn" onclick="this.closest('.list-item-row').remove()">&times;</button>
+                <button class="drawer-btn" onclick="this.closest('.list-item-row').remove()"><iconify-icon icon="lucide:trash-2" width="13"></iconify-icon></button>
             `;
             container.appendChild(row);
         });
@@ -870,7 +879,7 @@ function showToast(msg, isErr = false) {
     const toast = document.createElement('div');
     toast.className = 'toast-item';
     toast.style.borderColor = isErr ? 'var(--brand-red)' : 'var(--accent-green)';
-    toast.innerHTML = `<span>${isErr ? '⚠️' : '✅'}</span> <span>${escapeHtml(msg)}</span>`;
+    toast.innerHTML = `<span><iconify-icon icon="${isErr ? 'lucide:alert-circle' : 'lucide:check-circle-2'}" width="16" style="color: ${isErr ? 'var(--brand-red)' : 'var(--accent-green)'}; vertical-align: middle;"></iconify-icon></span> <span>${escapeHtml(msg)}</span>`;
     shelf.appendChild(toast);
 
     setTimeout(() => {
