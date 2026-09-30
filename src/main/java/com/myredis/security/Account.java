@@ -18,16 +18,22 @@ public class Account {
     private final String passwordHash;
     private final String avatarUrl;
     private final String provider; // "email" or "google"
+    private final String role;     // "admin" or "user"
     private final long createdAtMillis;
 
-    public Account(String id, String email, String name, String passwordHash, String avatarUrl, String provider, long createdAtMillis) {
+    public Account(String id, String email, String name, String passwordHash, String avatarUrl, String provider, String role, long createdAtMillis) {
         this.id = id;
         this.email = email != null ? email.trim().toLowerCase() : "";
         this.name = (name != null && !name.isBlank()) ? name.trim() : this.email;
         this.passwordHash = passwordHash;
         this.avatarUrl = avatarUrl != null ? avatarUrl : defaultAvatar(this.email, this.name);
         this.provider = provider != null ? provider : "email";
+        this.role = (role != null && !role.isBlank()) ? role.trim().toLowerCase() : ("admin@gmail.com".equalsIgnoreCase(this.email) ? "admin" : "user");
         this.createdAtMillis = createdAtMillis > 0 ? createdAtMillis : System.currentTimeMillis();
+    }
+
+    public Account(String id, String email, String name, String passwordHash, String avatarUrl, String provider, long createdAtMillis) {
+        this(id, email, name, passwordHash, avatarUrl, provider, null, createdAtMillis);
     }
 
     public String getId() {
@@ -52,6 +58,14 @@ public class Account {
 
     public String getProvider() {
         return provider;
+    }
+
+    public String getRole() {
+        return role;
+    }
+
+    public boolean isAdmin() {
+        return "admin".equalsIgnoreCase(role) || "admin@gmail.com".equalsIgnoreCase(email);
     }
 
     public long getCreatedAtMillis() {
@@ -91,7 +105,29 @@ public class Account {
         map.put("name", name);
         map.put("avatarUrl", avatarUrl);
         map.put("provider", provider);
+        map.put("role", role);
+        map.put("isAdmin", isAdmin());
         map.put("createdAt", createdAtMillis);
         return map;
+    }
+
+    public Map<String, Object> toMap() {
+        Map<String, Object> map = new LinkedHashMap<>(toSafeMap());
+        map.put("passwordHash", passwordHash);
+        return map;
+    }
+
+    public static Account fromMap(Map<String, Object> map) {
+        if (map == null) return null;
+        String id = (String) map.get("id");
+        String email = (String) map.get("email");
+        String name = (String) map.get("name");
+        String passwordHash = (String) map.get("passwordHash");
+        String avatarUrl = (String) map.get("avatarUrl");
+        String provider = (String) map.get("provider");
+        String role = (String) map.get("role");
+        long createdAt = map.containsKey("createdAt") ? ((Number) map.get("createdAt")).longValue() : System.currentTimeMillis();
+
+        return new Account(id, email, name, passwordHash, avatarUrl, provider, role, createdAt);
     }
 }

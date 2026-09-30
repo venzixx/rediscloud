@@ -1,13 +1,21 @@
 package com.myredis.storage;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myredis.stats.ServerMetrics;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Manages virtualized, tenant-isolated in-memory Redis database instances.
- * Supports multiple databases per user, email-based database sharing, and collaborator permissions.
+ * Supports multiple databases per user, email-based database sharing, collaborator permissions,
+ * and persistent storage across server restarts.
  */
 public class VirtualDatabaseManager {
 
@@ -15,27 +23,76 @@ public class VirtualDatabaseManager {
     private final Map<String, StorageEngine> legacyDatabases = new ConcurrentHashMap<>();
     private final Map<String, DatabaseInstance> databasesById = new ConcurrentHashMap<>();
 
+    private static final Path DATABASES_FILE = Paths.get("data", "databases.json");
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final boolean persistent;
+
+    private static boolean isTestEnvironment() {
+        return System.getProperty("surefire.test.class.path") != null ||
+               System.getProperty("test.env") != null;
+    }
+
     public VirtualDatabaseManager(StorageEngine rootStorage) {
+        this(rootStorage, !isTestEnvironment());
+    }
+
+    public VirtualDatabaseManager(StorageEngine rootStorage, boolean persistent) {
         this.rootStorage = rootStorage;
+        this.persistent = persistent;
         legacyDatabases.put("default", rootStorage);
         legacyDatabases.put("admin", rootStorage);
 
-        seedDemoDatabases();
+        if (persistent) {
+            loadFromDisk();
+        } else {
+            // In-memory mode (tests)
+            DatabaseInstance adminDb = createDatabase("admin@gmail.com", "Primary Production Cache", "db_primary_cache", "sec_admin_cache_99");
+            adminDb.getStorage().set("system:welcome", "Welcome to Redis Cloud!", null, false, false);
+            adminDb.getStorage().set("app:status", "online", null, false, false);
+        }
     }
 
-    private void seedDemoDatabases() {
-        // Create demo databases for alex@rediscloud.dev and sarah@company.io
-        DatabaseInstance prod = createDatabase("alex@rediscloud.dev", "Production Cache", "db_prod_cache", "sec_alex_prod_99");
-        prod.getStorage().set("app:status", "online", null, false, false);
-        prod.getStorage().set("cache:user:1", "{\"name\": \"Alice\", \"plan\": \"Pro\"}", null, false, false);
+    private synchronized void loadFromDisk() {
+        try {
+            File file = DATABASES_FILE.toFile();
+            if (file.exists() && file.length() > 0) {
+                List<Map<String, Object>> list = mapper.readValue(file, new TypeReference<>() {});
+                for (Map<String, Object> map : list) {
+                    StorageEngine storage = new StorageEngine(new ServerMetrics());
+                    DatabaseInstance db = DatabaseInstance.fromMetadataMap(map, storage);
+                    if (db != null) {
+                        databasesById.put(db.getId().toLowerCase(), db);
+                        legacyDatabases.put(db.getId().toLowerCase(), storage);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[VirtualDatabaseManager] Could not load databases from " + DATABASES_FILE + ": " + e.getMessage());
+        }
 
-        DatabaseInstance sessions = createDatabase("alex@rediscloud.dev", "Session Store", "db_session_store", "sec_alex_sess_88");
-        sessions.getStorage().set("session:usr_101", "active_jwt_token_alex", null, false, false);
-        // Share Session Store with Sarah as EDITOR
-        sessions.addCollaborator("sarah@company.io", "EDITOR");
+        // If no databases exist at all, create initial default database for admin@gmail.com
+        if (databasesById.isEmpty()) {
+            DatabaseInstance adminDb = createDatabase("admin@gmail.com", "Primary Production Cache", "db_primary_cache", "sec_admin_cache_99");
+            adminDb.getStorage().set("system:welcome", "Welcome to Redis Cloud!", null, false, false);
+            adminDb.getStorage().set("app:status", "online", null, false, false);
+        }
+    }
 
-        DatabaseInstance analytics = createDatabase("sarah@company.io", "Analytics Staging", "db_analytics_stg", "sec_sarah_ana_77");
-        analytics.getStorage().set("event:pageview", "48201", null, false, false);
+    private synchronized void saveToDisk() {
+        if (!persistent) return;
+        try {
+            Path parent = DATABASES_FILE.getParent();
+            if (parent != null && !Files.exists(parent)) {
+                Files.createDirectories(parent);
+            }
+            List<Map<String, Object>> list = new ArrayList<>();
+            for (DatabaseInstance db : databasesById.values()) {
+                list.add(db.toMetadataMap());
+            }
+            mapper.writerWithDefaultPrettyPrinter().writeValue(DATABASES_FILE.toFile(), list);
+        } catch (IOException e) {
+            System.err.println("[VirtualDatabaseManager] Failed to persist databases to disk: " + e.getMessage());
+        }
     }
 
     public synchronized DatabaseInstance createDatabase(String ownerEmail, String name) {
@@ -51,6 +108,8 @@ public class VirtualDatabaseManager {
         DatabaseInstance db = new DatabaseInstance(id, name, cleanOwner, customPassword, null, storage);
         databasesById.put(id.toLowerCase(), db);
         legacyDatabases.put(id.toLowerCase(), storage);
+
+        saveToDisk();
         return db;
     }
 
@@ -59,7 +118,7 @@ public class VirtualDatabaseManager {
         return databasesById.get(dbId.trim().toLowerCase());
     }
 
-    public boolean deleteDatabase(String dbId, String requesterEmail) {
+    public synchronized boolean deleteDatabase(String dbId, String requesterEmail) {
         DatabaseInstance db = getDatabase(dbId);
         if (db == null) return false;
         if (requesterEmail != null && !db.canAdmin(requesterEmail)) {
@@ -67,6 +126,7 @@ public class VirtualDatabaseManager {
         }
         databasesById.remove(db.getId().toLowerCase());
         legacyDatabases.remove(db.getId().toLowerCase());
+        saveToDisk();
         return true;
     }
 
@@ -103,7 +163,7 @@ public class VirtualDatabaseManager {
         return Map.of("myDatabases", owned, "sharedWithMe", shared);
     }
 
-    public boolean shareDatabase(String dbId, String requesterEmail, String targetEmail, String role) {
+    public synchronized boolean shareDatabase(String dbId, String requesterEmail, String targetEmail, String role) {
         DatabaseInstance db = getDatabase(dbId);
         if (db == null) {
             throw new IllegalArgumentException("Database not found: " + dbId);
@@ -112,10 +172,11 @@ public class VirtualDatabaseManager {
             throw new SecurityException("Only the database owner can share this database");
         }
         db.addCollaborator(targetEmail, role);
+        saveToDisk();
         return true;
     }
 
-    public boolean unshareDatabase(String dbId, String requesterEmail, String targetEmail) {
+    public synchronized boolean unshareDatabase(String dbId, String requesterEmail, String targetEmail) {
         DatabaseInstance db = getDatabase(dbId);
         if (db == null) {
             throw new IllegalArgumentException("Database not found: " + dbId);
@@ -124,15 +185,17 @@ public class VirtualDatabaseManager {
             throw new SecurityException("Only the database owner can manage collaborators");
         }
         db.removeCollaborator(targetEmail);
+        saveToDisk();
         return true;
     }
 
-    public DatabaseInstance joinByShareLink(String shareToken, String userEmail) {
+    public synchronized DatabaseInstance joinByShareLink(String shareToken, String userEmail) {
         if (shareToken == null || shareToken.isBlank() || userEmail == null || userEmail.isBlank()) return null;
         String cleanTok = shareToken.trim();
         for (DatabaseInstance db : databasesById.values()) {
             if (db.isShareLinkEnabled() && cleanTok.equals(db.getShareLinkToken())) {
                 db.addCollaborator(userEmail, db.getShareLinkRole());
+                saveToDisk();
                 return db;
             }
         }
@@ -141,7 +204,6 @@ public class VirtualDatabaseManager {
 
     /**
      * Authenticates a Redis client connection on the TCP wire protocol (port 6379).
-     * Matches either dbId:password, user:password, or single-token (token / password).
      */
     public DatabaseInstance resolveDatabaseByAuth(String userOrId, String passOrToken) {
         if (userOrId != null && passOrToken != null) {
@@ -151,7 +213,6 @@ public class VirtualDatabaseManager {
             }
         }
 
-        // Single argument token or password
         String single = (passOrToken != null) ? passOrToken : userOrId;
         if (single != null && !single.isBlank()) {
             String val = single.trim();
@@ -164,9 +225,6 @@ public class VirtualDatabaseManager {
         return null;
     }
 
-    /**
-     * Resolves a virtual storage engine by database name, database ID, or tenant name.
-     */
     public StorageEngine getStorageByDbName(String dbName) {
         if (dbName == null || dbName.isBlank() || "default".equalsIgnoreCase(dbName) || "db0".equalsIgnoreCase(dbName) || "admin".equalsIgnoreCase(dbName)) {
             return rootStorage;
@@ -184,9 +242,6 @@ public class VirtualDatabaseManager {
         return legacyDatabases.computeIfAbsent(clean, u -> new StorageEngine(new ServerMetrics()));
     }
 
-    /**
-     * Backward-compatible helper for user storage resolution.
-     */
     public StorageEngine getStorageForUser(String username) {
         if (username == null || username.isBlank() || "admin".equalsIgnoreCase(username) || "default".equalsIgnoreCase(username)) {
             return rootStorage;
@@ -203,7 +258,7 @@ public class VirtualDatabaseManager {
     public List<Map<String, Object>> listDatabases() {
         List<Map<String, Object>> list = new ArrayList<>();
 
-        // Root
+        // Root db0
         Map<String, Object> rootItem = new LinkedHashMap<>();
         rootItem.put("id", "db0");
         rootItem.put("name", "db0 (Default Root)");

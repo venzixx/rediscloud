@@ -164,3 +164,15 @@ pre code {
 .pulse-dot {
     animation: pulseDot 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* Landing Page Elements */
+.landing-tab-btn {
+    transition: all 0.15s ease-in-out;
+}
+.landing-tab-btn:hover {
+    color: #ffffff;
+}
+.landing-tab-btn.active {
+    background-color: #9333ea;
+    color: #ffffff;
+}

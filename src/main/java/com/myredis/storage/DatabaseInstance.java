@@ -26,7 +26,7 @@ public class DatabaseInstance {
     private boolean shareLinkEnabled = false;
     private String shareLinkRole = "VIEWER";
 
-    public DatabaseInstance(String id, String name, String ownerEmail, String password, String apiToken, StorageEngine storage) {
+    public DatabaseInstance(String id, String name, String ownerEmail, String password, String apiToken, StorageEngine storage, long createdAtMillis) {
         this.id = id != null ? id.trim() : ("db_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8));
         this.name = (name != null && !name.isBlank()) ? name.trim() : this.id;
         this.ownerEmail = ownerEmail != null ? ownerEmail.trim().toLowerCase() : "default";
@@ -37,13 +37,17 @@ public class DatabaseInstance {
                 ? apiToken.trim()
                 : "red_api_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
         this.storage = storage != null ? storage : new StorageEngine(new ServerMetrics());
-        this.createdAtMillis = System.currentTimeMillis();
+        this.createdAtMillis = createdAtMillis > 0 ? createdAtMillis : System.currentTimeMillis();
         this.shareLinkToken = "lnk_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
 
         // Owner has full OWNER rights
         if (!this.ownerEmail.isBlank()) {
             collaborators.put(this.ownerEmail, "OWNER");
         }
+    }
+
+    public DatabaseInstance(String id, String name, String ownerEmail, String password, String apiToken, StorageEngine storage) {
+        this(id, name, ownerEmail, password, apiToken, storage, System.currentTimeMillis());
     }
 
     public String getId() {
@@ -141,6 +145,47 @@ public class DatabaseInstance {
     public boolean canAdmin(String email) {
         String role = getUserRole(email);
         return "OWNER".equals(role);
+    }
+
+    public Map<String, Object> toMetadataMap() {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("id", id);
+        map.put("name", name);
+        map.put("ownerEmail", ownerEmail);
+        map.put("password", password);
+        map.put("apiToken", apiToken);
+        map.put("createdAt", createdAtMillis);
+        map.put("shareLinkToken", shareLinkToken);
+        map.put("shareLinkEnabled", shareLinkEnabled);
+        map.put("shareLinkRole", shareLinkRole);
+        map.put("collaborators", new HashMap<>(collaborators));
+        return map;
+    }
+
+    @SuppressWarnings("unchecked")
+    public static DatabaseInstance fromMetadataMap(Map<String, Object> map, StorageEngine storage) {
+        if (map == null) return null;
+        String id = (String) map.get("id");
+        String name = (String) map.get("name");
+        String ownerEmail = (String) map.get("ownerEmail");
+        String password = (String) map.get("password");
+        String apiToken = (String) map.get("apiToken");
+        long createdAt = map.containsKey("createdAt") ? ((Number) map.get("createdAt")).longValue() : System.currentTimeMillis();
+
+        DatabaseInstance db = new DatabaseInstance(id, name, ownerEmail, password, apiToken, storage, createdAt);
+        if (map.containsKey("shareLinkToken")) {
+            db.shareLinkToken = (String) map.get("shareLinkToken");
+        }
+        if (map.containsKey("shareLinkEnabled")) {
+            db.shareLinkEnabled = Boolean.TRUE.equals(map.get("shareLinkEnabled"));
+        }
+        if (map.containsKey("shareLinkRole")) {
+            db.shareLinkRole = (String) map.get("shareLinkRole");
+        }
+        if (map.get("collaborators") instanceof Map<?, ?> collabs) {
+            collabs.forEach((k, v) -> db.addCollaborator(String.valueOf(k), String.valueOf(v)));
+        }
+        return db;
     }
 
     public Map<String, Object> toMap(String host, int redisPort, int webPort, String requesterEmail) {

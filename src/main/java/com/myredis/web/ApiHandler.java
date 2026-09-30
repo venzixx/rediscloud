@@ -264,6 +264,11 @@ public class ApiHandler implements HttpHandler {
     }
 
     private void handleAuthDemoUsers(HttpExchange exchange) throws IOException {
+        Account user = resolveRequestingUser(exchange);
+        if (user == null || !user.isAdmin()) {
+            sendJson(exchange, 403, Map.of("error", "Admin privileges required", "users", List.of()));
+            return;
+        }
         List<Map<String, Object>> list = new ArrayList<>();
         if (accountManager != null) {
             for (Account acc : accountManager.listAccounts()) {
@@ -280,20 +285,25 @@ public class ApiHandler implements HttpHandler {
     private void handleListDatabases(HttpExchange exchange) throws IOException {
         String host = resolveHost(exchange);
         Account user = resolveRequestingUser(exchange);
-        String userEmail = user != null ? user.getEmail() : "alex@rediscloud.dev";
+
+        if (user == null) {
+            sendJson(exchange, 401, Map.of("error", "Unauthorized", "myDatabases", List.of(), "sharedWithMe", List.of(), "databases", List.of()));
+            return;
+        }
+        String userEmail = user.getEmail();
 
         if (virtualDbManager == null) {
-            sendJson(exchange, 200, Map.of("myDatabases", List.of(), "sharedWithMe", List.of(), "all", List.of()));
+            sendJson(exchange, 200, Map.of("myDatabases", List.of(), "sharedWithMe", List.of(), "databases", List.of()));
             return;
         }
 
         Map<String, List<DatabaseInstance>> cat = virtualDbManager.getCategorizedDatabases(userEmail);
         List<Map<String, Object>> myDbs = cat.get("myDatabases").stream().map(d -> d.toMap(host, redisPort, webPort, userEmail)).toList();
         List<Map<String, Object>> shared = cat.get("sharedWithMe").stream().map(d -> d.toMap(host, redisPort, webPort, userEmail)).toList();
-        List<Map<String, Object>> allList = virtualDbManager.listDatabases();
+        List<Map<String, Object>> allList = user.isAdmin() ? virtualDbManager.listDatabases() : myDbs;
 
         sendJson(exchange, 200, Map.of(
-                "user", user != null ? user.toSafeMap() : Map.of("email", userEmail),
+                "user", user.toSafeMap(),
                 "myDatabases", myDbs,
                 "sharedWithMe", shared,
                 "databases", allList
@@ -314,7 +324,11 @@ public class ApiHandler implements HttpHandler {
         }
 
         Account user = resolveRequestingUser(exchange);
-        String ownerEmail = user != null ? user.getEmail() : "alex@rediscloud.dev";
+        if (user == null) {
+            sendJson(exchange, 401, Map.of("error", "Sign in required to create databases"));
+            return;
+        }
+        String ownerEmail = user.getEmail();
 
         DatabaseInstance db = virtualDbManager.createDatabase(ownerEmail, name, customId, customPass);
         String host = resolveHost(exchange);
@@ -470,8 +484,7 @@ public class ApiHandler implements HttpHandler {
             return accountManager.getAccountByEmail(qp.get("userEmail"));
         }
 
-        // Demo user default fallback for unauthenticated development
-        return accountManager.getAccountByEmail("alex@rediscloud.dev");
+        return null;
     }
 
     private void checkWritePermission(String dbId, Account user) {
@@ -535,10 +548,26 @@ public class ApiHandler implements HttpHandler {
 
     private void handleStats(HttpExchange exchange) throws IOException {
         Map<String, String> qp = parseQueryParams(exchange.getRequestURI().getQuery());
+        Account user = resolveRequestingUser(exchange);
         StorageEngine target = resolveStorage(qp);
         Map<String, Object> stats = target.getMetrics().toMap(target.dbSize());
         stats.put("activeDb", getActiveDbName(qp));
-        stats.put("databases", virtualDbManager != null ? virtualDbManager.listDatabases() : List.of());
+
+        List<Map<String, Object>> dbList = new ArrayList<>();
+        if (virtualDbManager != null && user != null) {
+            if (user.isAdmin()) {
+                dbList = virtualDbManager.listDatabases();
+            } else {
+                var cat = virtualDbManager.getCategorizedDatabases(user.getEmail());
+                for (DatabaseInstance db : cat.get("myDatabases")) {
+                    dbList.add(Map.of("id", db.getId(), "name", db.getName(), "owner", db.getOwnerEmail(), "keys", db.getStorage().dbSize()));
+                }
+                for (DatabaseInstance db : cat.get("sharedWithMe")) {
+                    dbList.add(Map.of("id", db.getId(), "name", db.getName(), "owner", db.getOwnerEmail(), "keys", db.getStorage().dbSize()));
+                }
+            }
+        }
+        stats.put("databases", dbList);
         sendJson(exchange, 200, stats);
     }
 

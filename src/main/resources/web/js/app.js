@@ -26,12 +26,46 @@ let activeConnectTab = 'prisma';
 
 // User & Database Hub State
 let currentUser = null;
-let currentSessionToken = localStorage.getItem('redis_studio_session') || '';
+let currentSessionToken = localStorage.getItem('redis_cloud_session') || localStorage.getItem('redis_studio_session') || '';
 let userDatabases = { myDatabases: [], sharedWithMe: [] };
 let activeDbInstance = null;
 let activeDatabaseRole = 'OWNER';
 let activeDbTab = 'my';
 let activeShareDbId = null;
+
+// Wrap window.fetch to automatically include Authorization token
+const originalFetch = window.fetch;
+window.fetch = async function(url, options = {}) {
+    options = options || {};
+    options.headers = options.headers || {};
+    if (currentSessionToken) {
+        if (options.headers instanceof Headers) {
+            if (!options.headers.has('Authorization')) {
+                options.headers.set('Authorization', `Bearer ${currentSessionToken}`);
+            }
+        } else {
+            if (!options.headers['Authorization']) {
+                options.headers['Authorization'] = `Bearer ${currentSessionToken}`;
+            }
+        }
+    }
+    const response = await originalFetch(url, options);
+    if (response.status === 401 && typeof url === 'string' && !url.includes('/api/auth/login') && !url.includes('/api/auth/register') && !url.includes('/api/auth/me')) {
+        handleSessionExpired();
+    }
+    return response;
+};
+
+function handleSessionExpired() {
+    if (currentSessionToken) {
+        currentSessionToken = null;
+        currentUser = null;
+        localStorage.removeItem('redis_cloud_session');
+        localStorage.removeItem('redis_studio_session');
+        showLandingPage();
+        showToast('Session expired. Please sign in again.', true);
+    }
+}
 
 // Charts References
 let overviewChartInstance = null;
@@ -77,13 +111,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initOverviewDashboard();
     initAnalyticsPage();
     initTeamPage();
-
-    fetchKeys();
-    fetchStats();
-    loadTenants();
-
-    // Check URL parameters (e.g. invite join link #join=lnk_...)
-    checkInviteHash();
 });
 
 // ==========================================
@@ -2075,13 +2102,176 @@ curl -X POST -H "Authorization: Bearer tok_admin_live_secret" \\
 }
 
 // ==========================================
-// Authentication & User Profiles
+// Authentication, Landing Page & Production Flow
 // ==========================================
-function initAuth() {
+
+const LANDING_CODE_SNIPPETS = {
+    prisma: {
+        filename: 'schema.prisma & client.ts',
+        code: `// 1. Configure datasource in schema.prisma or .env
+DATABASE_URL="redis://db_primary_cache:sec_admin_cache_99@localhost:6379"
+
+// 2. High-speed caching in Next.js / Node.js
+import { Redis } from "ioredis";
+const redis = new Redis(process.env.DATABASE_URL);
+
+// Instant read/write with sub-millisecond Loom Virtual Thread latency
+await redis.set("user:1001:profile", JSON.stringify({ id: 1001, name: "Alice", role: "admin" }), "EX", 3600);
+const cached = await redis.get("user:1001:profile");
+console.log("Cached User:", JSON.parse(cached));`
+    },
+    ioredis: {
+        filename: 'cache.service.ts',
+        code: `import Redis from "ioredis";
+
+// Connect directly to virtualized Redis keyspace
+const redis = new Redis({
+  host: "localhost",
+  port: 6379,
+  username: "db_primary_cache",       // Isolated virtual database ID
+  password: "sec_admin_cache_99",     // Dedicated database password
+  lazyConnect: true
+});
+
+await redis.connect();
+await redis.hset("session:token:990", { userId: "usr_1001", role: "editor" });
+const session = await redis.hgetall("session:token:990");
+console.log("Active Session:", session);`
+    },
+    python: {
+        filename: 'redis_client.py',
+        code: `import redis
+
+# Connect to isolated virtual keyspace
+client = redis.Redis(
+    host='localhost',
+    port=6379,
+    username='db_primary_cache',
+    password='sec_admin_cache_99',
+    decode_responses=True
+)
+
+# Benchmark rapid in-memory operations
+client.set('model:weights:v1', 'loaded', ex=600)
+status = client.get('model:weights:v1')
+print(f"Status: {status} | DB Size: {client.dbsize()}")`
+    },
+    cli: {
+        filename: 'terminal.sh',
+        code: `# Connect with native standard redis-cli client
+redis-cli -h localhost -p 6379 -a sec_admin_cache_99
+
+# Select or authenticate to virtual keyspace
+127.0.0.1:6379> AUTH db_primary_cache sec_admin_cache_99
+OK
+127.0.0.1:6379> PING
+PONG
+127.0.0.1:6379> SET cluster:status "online" EX 300
+OK
+127.0.0.1:6379> GET cluster:status
+"online"`
+    },
+    rest: {
+        filename: 'curl_rest_api.sh',
+        code: `# Direct HTTP REST execution from Edge Runtimes (Cloudflare Workers, Vercel)
+# GET Key
+curl -H "Authorization: Bearer tok_admin_live_secret" \\
+  http://localhost:8080/v1/get/cluster:status
+
+# POST Set Key with Expiration
+curl -X POST -H "Authorization: Bearer tok_admin_live_secret" \\
+  -H "Content-Type: application/json" \\
+  -d '{"key": "cache:edge:flag", "value": "enabled", "ttl": 300}' \\
+  http://localhost:8080/v1/set`
+    }
+};
+
+function initLandingPage() {
+    const tabs = document.querySelectorAll('.landing-tab-btn');
+    const codeBlock = document.getElementById('landingCodeBlock');
+    const filenameLabel = document.getElementById('landingCodeFilename');
+    const copyBtn = document.getElementById('copyLandingSnippetBtn');
+    const copyText = document.getElementById('copyLandingSnippetText');
+    const copyCliBtn = document.getElementById('copyQuickCliBtn');
+
+    if (tabs.length && codeBlock) {
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => {
+                    t.className = 'landing-tab-btn px-2.5 py-1 rounded text-slate-400 hover:text-white';
+                });
+                tab.className = 'landing-tab-btn active px-2.5 py-1 rounded bg-purple-600 text-white font-medium';
+                const key = tab.getAttribute('data-tab');
+                if (LANDING_CODE_SNIPPETS[key]) {
+                    codeBlock.textContent = LANDING_CODE_SNIPPETS[key].code;
+                    if (filenameLabel) filenameLabel.textContent = LANDING_CODE_SNIPPETS[key].filename;
+                }
+            });
+        });
+    }
+
+    if (copyBtn && codeBlock) {
+        copyBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(codeBlock.textContent);
+            if (copyText) copyText.textContent = 'Copied!';
+            setTimeout(() => {
+                if (copyText) copyText.textContent = 'Copy Code';
+            }, 2000);
+        });
+    }
+
+    if (copyCliBtn) {
+        copyCliBtn.addEventListener('click', () => {
+            const cmd = document.getElementById('quickCliCommand');
+            if (cmd) {
+                navigator.clipboard.writeText(cmd.textContent.trim());
+                showToast('CLI command copied to clipboard');
+            }
+        });
+    }
+
+    // Connect landing CTAs to Auth modal
+    const signIns = ['landingSignInBtn', 'heroSignInBtn', 'ctaSignInBtn'];
+    signIns.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', () => openAuthModal('login'));
+    });
+
+    const registers = ['landingGetStartedBtn', 'heroDeployBtn', 'ctaDeployBtn'];
+    registers.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', () => openAuthModal('register'));
+    });
+}
+
+function showLandingPage() {
+    const landing = document.getElementById('publicLandingPage');
+    const dashboard = document.getElementById('appDashboard');
+    if (landing) landing.classList.remove('hidden');
+    if (dashboard) dashboard.classList.add('hidden');
+    if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+}
+
+function showDashboard() {
+    const landing = document.getElementById('publicLandingPage');
+    const dashboard = document.getElementById('appDashboard');
+    if (landing) landing.classList.add('hidden');
+    if (dashboard) dashboard.classList.remove('hidden');
+}
+
+async function initAuth() {
+    initLandingPage();
+
     const profileBtn = document.getElementById('userProfileBtn');
     const dropdown = document.getElementById('userDropdownCard');
     const signOutBtn = document.getElementById('menuSignOutBtn');
-    const switchAccountBtn = document.getElementById('menuSwitchAccountBtn');
+    const adminAccountsBtn = document.getElementById('adminAccountsBtn');
+    const closeAuthBtn = document.getElementById('closeAuthModalBtn');
+    const closeAdminBtn = document.getElementById('closeAdminAccountsModalBtn');
+    const closeAdminBtn2 = document.getElementById('closeAdminAccountsModalBtn2');
 
     if (profileBtn && dropdown) {
         profileBtn.addEventListener('click', (e) => {
@@ -2096,59 +2286,117 @@ function initAuth() {
     }
 
     if (signOutBtn) {
-        signOutBtn.addEventListener('click', () => {
-            localStorage.removeItem('redis_studio_session');
+        signOutBtn.addEventListener('click', async () => {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch (err) {}
+            currentSessionToken = null;
             currentUser = null;
-            openAuthModal();
+            localStorage.removeItem('redis_cloud_session');
+            localStorage.removeItem('redis_studio_session');
+            if (dropdown) dropdown.classList.add('hidden');
+            showLandingPage();
+            showToast('Signed out successfully.');
         });
     }
 
-    if (switchAccountBtn) {
-        switchAccountBtn.addEventListener('click', () => {
+    if (closeAuthBtn) closeAuthBtn.addEventListener('click', closeAuthModal);
+    if (closeAdminBtn) closeAdminBtn.addEventListener('click', closeAdminAccountsModal);
+    if (closeAdminBtn2) closeAdminBtn2.addEventListener('click', closeAdminAccountsModal);
+
+    if (adminAccountsBtn) {
+        adminAccountsBtn.addEventListener('click', () => {
             if (dropdown) dropdown.classList.add('hidden');
-            openAuthModal();
+            openAdminAccountsModal();
         });
     }
 
     // Google Sign In
     const googleBtn = document.getElementById('googleSignInBtn');
     if (googleBtn) {
-        googleBtn.addEventListener('click', () => {
-            authenticateDemoUser('alex@rediscloud.dev', 'Alex Rivera');
+        googleBtn.addEventListener('click', async () => {
+            const email = prompt('Enter your Google Account email for Single Sign-On:', 'developer@gmail.com');
+            if (!email || !email.includes('@')) return;
+            try {
+                const res = await fetch('/api/auth/google', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: email.trim(), name: email.split('@')[0], avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(email)}` })
+                });
+                const data = await res.json();
+                if (res.ok && data.token) {
+                    onAuthSuccess(data);
+                } else {
+                    showAuthError(data.error || 'Google authentication failed');
+                }
+            } catch (err) {
+                showAuthError('Connection error during Google Sign-In');
+            }
         });
     }
 
-    // Demo profile 1-click buttons
-    const demoAlex = document.getElementById('demoUserAlexBtn');
-    const demoSarah = document.getElementById('demoUserSarahBtn');
-    if (demoAlex) {
-        demoAlex.addEventListener('click', () => {
-            authenticateDemoUser('alex@rediscloud.dev', 'Alex Rivera');
-        });
-    }
-    if (demoSarah) {
-        demoSarah.addEventListener('click', () => {
-            authenticateDemoUser('sarah@company.io', 'Sarah Chen');
-        });
-    }
-
-    // Forms
+    // Real Login Form
     const loginForm = document.getElementById('authLoginForm');
     if (loginForm) {
-        loginForm.addEventListener('submit', (e) => {
+        loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            hideAuthError();
             const email = document.getElementById('loginEmailInput').value.trim();
-            authenticateDemoUser(email, email.split('@')[0]);
+            const password = document.getElementById('loginPasswordInput').value;
+
+            const submitBtn = document.getElementById('loginSubmitBtn');
+            if (submitBtn) submitBtn.disabled = true;
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+                if (res.ok && data.token) {
+                    onAuthSuccess(data);
+                } else {
+                    showAuthError(data.error || 'Invalid email or password');
+                }
+            } catch (err) {
+                showAuthError('Unable to connect to authentication service');
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+            }
         });
     }
 
+    // Real Register Form
     const regForm = document.getElementById('authRegisterForm');
     if (regForm) {
-        regForm.addEventListener('submit', (e) => {
+        regForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const email = document.getElementById('regEmailInput').value.trim();
+            hideAuthError();
             const name = document.getElementById('regNameInput').value.trim();
-            authenticateDemoUser(email, name);
+            const email = document.getElementById('regEmailInput').value.trim();
+            const password = document.getElementById('regPasswordInput').value;
+
+            const submitBtn = document.getElementById('regSubmitBtn');
+            if (submitBtn) submitBtn.disabled = true;
+
+            try {
+                const res = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, name })
+                });
+                const data = await res.json();
+                if (res.ok && data.token) {
+                    onAuthSuccess(data, true);
+                } else {
+                    showAuthError(data.error || 'Failed to create account');
+                }
+            } catch (err) {
+                showAuthError('Unable to connect to registration service');
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+            }
         });
     }
 
@@ -2156,39 +2404,149 @@ function initAuth() {
     const tabLogin = document.getElementById('authTabLogin');
     const tabReg = document.getElementById('authTabRegister');
     if (tabLogin && tabReg) {
-        tabLogin.addEventListener('click', () => {
-            tabLogin.className = 'flex-1 py-1.5 rounded-md bg-white text-gray-900 shadow-sm transition-all';
-            tabReg.className = 'flex-1 py-1.5 rounded-md text-gray-500 hover:text-gray-900 transition-all';
-            document.getElementById('authLoginForm').classList.remove('hidden');
-            document.getElementById('authRegisterForm').classList.add('hidden');
-        });
-        tabReg.addEventListener('click', () => {
-            tabReg.className = 'flex-1 py-1.5 rounded-md bg-white text-gray-900 shadow-sm transition-all';
-            tabLogin.className = 'flex-1 py-1.5 rounded-md text-gray-500 hover:text-gray-900 transition-all';
-            document.getElementById('authRegisterForm').classList.remove('hidden');
-            document.getElementById('authLoginForm').classList.add('hidden');
-        });
+        tabLogin.addEventListener('click', () => switchAuthTab('login'));
+        tabReg.addEventListener('click', () => switchAuthTab('register'));
     }
 
-    // Default user on start
-    currentUser = {
-        name: 'Alex Rivera',
-        email: 'alex@rediscloud.dev',
-        avatar: 'https://api.dicebear.com/7.x/identicon/svg?seed=Alex'
-    };
-    updateUserProfileUI(currentUser);
+    // Auto-check existing session on page load
+    if (currentSessionToken) {
+        try {
+            const res = await fetch('/api/auth/me');
+            if (res.ok) {
+                const data = await res.json();
+                if (data.authenticated && data.user) {
+                    currentUser = data.user;
+                    updateUserProfileUI(currentUser);
+                    showDashboard();
+                    startAuthenticatedSession();
+                    return;
+                }
+            }
+        } catch (err) {
+            console.warn('Session verification error:', err);
+        }
+    }
+
+    // If unauthenticated: show Landing Page
+    currentSessionToken = null;
+    currentUser = null;
+    showLandingPage();
 }
 
-function authenticateDemoUser(email, name) {
-    currentUser = {
-        name: name || 'Alex Rivera',
-        email: email,
-        avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(name || email)}`
-    };
+function onAuthSuccess(data, isNew = false) {
+    currentSessionToken = data.token;
+    localStorage.setItem('redis_cloud_session', currentSessionToken);
+    currentUser = data.user;
     updateUserProfileUI(currentUser);
     closeAuthModal();
-    showToast(`Signed in as ${currentUser.name}`);
+    showDashboard();
+    startAuthenticatedSession();
+    showToast(isNew ? `Welcome to Redis Cloud, ${currentUser.name}!` : `Welcome back, ${currentUser.name}!`);
+}
+
+function startAuthenticatedSession() {
     loadUserDatabases();
+    fetchKeys();
+    fetchStats();
+    loadTenants();
+    fetchOverviewMetrics();
+    checkInviteHash();
+}
+
+function switchAuthTab(tab) {
+    hideAuthError();
+    const tabLogin = document.getElementById('authTabLogin');
+    const tabReg = document.getElementById('authTabRegister');
+    const formLogin = document.getElementById('authLoginForm');
+    const formReg = document.getElementById('authRegisterForm');
+
+    if (tab === 'login') {
+        if (tabLogin) tabLogin.className = 'flex-1 py-1.5 rounded-md bg-white text-gray-900 shadow-sm transition-all';
+        if (tabReg) tabReg.className = 'flex-1 py-1.5 rounded-md text-gray-500 hover:text-gray-900 transition-all';
+        if (formLogin) formLogin.classList.remove('hidden');
+        if (formReg) formReg.classList.add('hidden');
+    } else {
+        if (tabReg) tabReg.className = 'flex-1 py-1.5 rounded-md bg-white text-gray-900 shadow-sm transition-all';
+        if (tabLogin) tabLogin.className = 'flex-1 py-1.5 rounded-md text-gray-500 hover:text-gray-900 transition-all';
+        if (formReg) formReg.classList.remove('hidden');
+        if (formLogin) formLogin.classList.add('hidden');
+    }
+}
+
+function showAuthError(msg) {
+    const box = document.getElementById('authErrorMessage');
+    const text = document.getElementById('authErrorText');
+    if (box && text) {
+        text.textContent = msg;
+        box.classList.remove('hidden');
+    }
+}
+
+function hideAuthError() {
+    const box = document.getElementById('authErrorMessage');
+    if (box) box.classList.add('hidden');
+}
+
+function openAuthModal(tab = 'login') {
+    switchAuthTab(tab);
+    const modal = document.getElementById('authModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeAuthModal() {
+    const modal = document.getElementById('authModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function openAdminAccountsModal() {
+    const modal = document.getElementById('adminAccountsModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        loadAdminAccountsList();
+    }
+}
+
+function closeAdminAccountsModal() {
+    const modal = document.getElementById('adminAccountsModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function loadAdminAccountsList() {
+    const list = document.getElementById('adminAccountsList');
+    if (!list) return;
+    list.innerHTML = '<div class="py-4 text-center text-xs text-gray-500">Loading system accounts...</div>';
+
+    try {
+        const res = await fetch('/api/auth/demo-users');
+        if (!res.ok) {
+            list.innerHTML = '<div class="py-4 text-center text-xs text-red-500">Superadmin privileges required.</div>';
+            return;
+        }
+        const data = await res.json();
+        const users = data.users || [];
+        if (!users.length) {
+            list.innerHTML = '<div class="py-4 text-center text-xs text-gray-500">No registered accounts found.</div>';
+            return;
+        }
+
+        list.innerHTML = users.map(u => `
+            <div class="py-3 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <img src="${u.avatarUrl || 'https://api.dicebear.com/7.x/identicon/svg?seed=' + encodeURIComponent(u.email)}" class="w-8 h-8 rounded-full border border-gray-200">
+                    <div>
+                        <div class="text-xs font-semibold text-gray-900 flex items-center gap-1.5">
+                            <span>${u.name || u.email}</span>
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}">${u.role || 'user'}</span>
+                        </div>
+                        <div class="text-[11px] text-gray-500 font-mono">${u.email}</div>
+                    </div>
+                </div>
+                <div class="text-xs text-gray-400 font-mono">${u.id}</div>
+            </div>
+        `).join('');
+    } catch (err) {
+        list.innerHTML = '<div class="py-4 text-center text-xs text-red-500">Error loading system accounts.</div>';
+    }
 }
 
 function updateUserProfileUI(user) {
@@ -2197,21 +2555,23 @@ function updateUserProfileUI(user) {
     const dropAvatar = document.getElementById('userDropdownAvatar');
     const dropName = document.getElementById('userDropdownName');
     const dropEmail = document.getElementById('userDropdownEmail');
+    const adminSection = document.getElementById('adminMenuSection');
 
-    if (avatar) avatar.src = user.avatar;
-    if (dropAvatar) dropAvatar.src = user.avatar;
-    if (dropName) dropName.textContent = user.name;
+    const avatarUrl = user.avatarUrl || user.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(user.email)}`;
+
+    if (avatar) avatar.src = avatarUrl;
+    if (dropAvatar) dropAvatar.src = avatarUrl;
+    if (dropName) dropName.textContent = user.name || user.email.split('@')[0];
     if (dropEmail) dropEmail.textContent = user.email;
-}
 
-function openAuthModal() {
-    const modal = document.getElementById('authModal');
-    if (modal) modal.classList.remove('hidden');
-}
-
-function closeAuthModal() {
-    const modal = document.getElementById('authModal');
-    if (modal) modal.classList.add('hidden');
+    // Superadmin verification: ONLY admin@gmail.com or role 'admin' can see the superadmin tools
+    if (adminSection) {
+        if (user.role === 'admin' || user.email === 'admin@gmail.com' || user.isAdmin === true) {
+            adminSection.classList.remove('hidden');
+        } else {
+            adminSection.classList.add('hidden');
+        }
+    }
 }
 
 // Check join invite hash in URL (e.g. #join=lnk_xxxx)
