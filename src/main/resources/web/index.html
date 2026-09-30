@@ -3,381 +3,945 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Redis Studio - Database Console</title>
-    <link rel="stylesheet" href="/css/style.css">
+    <title>Redis Cloud - Enterprise In-Memory Database</title>
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    },
+                    colors: {
+                        purple: {
+                            50: '#faf5ff',
+                            100: '#f3e8ff',
+                            200: '#e9d5ff',
+                            300: '#d8b4fe',
+                            400: '#c084fc',
+                            500: '#a855f7',
+                            600: '#9333ea',
+                            700: '#7e22ce',
+                            800: '#6b21a8',
+                            900: '#581c87',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Iconify Script -->
     <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="/css/style.css">
 </head>
-<body class="studio-theme">
-    <div class="studio-layout">
-        <!-- Sidebar Navigation -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <div class="brand">
-                    <div class="logo-box">
-                        <iconify-icon icon="logos:redis" width="22" height="22"></iconify-icon>
+<body class="bg-white text-gray-900 font-sans antialiased min-h-screen">
+    <div class="min-h-screen bg-white flex flex-col">
+        <!-- Header -->
+        <header class="h-16 border-b border-gray-200 bg-white px-6 flex items-center justify-between sticky top-0 z-30">
+            <div class="flex items-center gap-4">
+                <!-- Brand -->
+                <div class="flex items-center gap-2.5 cursor-pointer" onclick="navigateToPane('pane-overview')">
+                    <div class="w-8 h-8 bg-gradient-to-br from-purple-600 to-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm">
+                        <iconify-icon icon="logos:redis" width="20" height="20"></iconify-icon>
                     </div>
-                    <div class="brand-info">
-                        <span class="brand-title">Redis<span class="red-text">Studio</span></span>
-                        <span class="brand-sub">Enterprise In-Memory DB</span>
-                    </div>
+                    <span class="font-semibold text-gray-900 text-base tracking-tight">Redis<span class="text-purple-600">Cloud</span></span>
                 </div>
-            </div>
 
-            <!-- Database connection info -->
-            <div class="db-selector">
-                <div class="db-badge">
-                    <span class="db-dot"></span>
-                    <span class="db-name" id="sbDbEndpoint">redis://localhost:6379</span>
-                </div>
-                <div class="db-pill" id="sbActiveDbPill">db0</div>
-            </div>
+                <!-- Breadcrumbs & Active Virtual DB Selector -->
+                <div class="hidden sm:flex items-center text-sm text-gray-500 gap-1.5 pl-2 border-l border-gray-200">
+                    <span>Dashboard</span>
+                    <span class="text-gray-400">/</span>
+                    <span class="capitalize text-gray-900 font-medium" id="currentViewBreadcrumb">Overview</span>
 
-            <!-- Views / Tables Navigation -->
-            <div class="sidebar-section">
-                <span class="section-label">DATA VIEWS</span>
-                <nav class="nav-tree">
-                    <button class="nav-item active" data-view-pane="pane-datasheet" data-type-filter="ALL">
-                        <iconify-icon icon="lucide:layout-grid" class="nav-icon" width="16"></iconify-icon>
-                        <span class="nav-text">All Records</span>
-                        <span class="nav-count" id="countAll">-</span>
-                    </button>
-                    <button class="nav-item" data-view-pane="pane-datasheet" data-type-filter="string">
-                        <iconify-icon icon="lucide:type" class="nav-icon str" width="16"></iconify-icon>
-                        <span class="nav-text">Strings</span>
-                        <span class="nav-count" id="countStrings">-</span>
-                    </button>
-                    <button class="nav-item" data-view-pane="pane-datasheet" data-type-filter="hash">
-                        <iconify-icon icon="lucide:boxes" class="nav-icon hsh" width="16"></iconify-icon>
-                        <span class="nav-text">Hashes</span>
-                        <span class="nav-count" id="countHashes">-</span>
-                    </button>
-                    <button class="nav-item" data-view-pane="pane-datasheet" data-type-filter="list">
-                        <iconify-icon icon="lucide:list-ordered" class="nav-icon lst" width="16"></iconify-icon>
-                        <span class="nav-text">Lists</span>
-                        <span class="nav-count" id="countLists">-</span>
-                    </button>
-                    <button class="nav-item" data-view-pane="pane-datasheet" data-type-filter="set">
-                        <iconify-icon icon="lucide:shapes" class="nav-icon st" width="16"></iconify-icon>
-                        <span class="nav-text">Sets</span>
-                        <span class="nav-count" id="countSets">-</span>
-                    </button>
-                </nav>
-            </div>
-
-            <!-- Namespaces / Tree Folders -->
-            <div class="sidebar-section">
-                <div class="section-label-row">
-                    <span class="section-label">NAMESPACES</span>
-                    <span class="namespace-refresh" id="refreshNamespacesBtn" title="Scan namespaces">
-                        <iconify-icon icon="lucide:rotate-cw" width="13"></iconify-icon>
-                    </span>
-                </div>
-                <div class="namespace-list" id="namespaceTreeList">
-                    <!-- Populated dynamically (e.g. user:, devops:, active:) -->
-                    <div class="tree-item empty">Scanning keys...</div>
-                </div>
-            </div>
-
-            <!-- Cloud & Enterprise Platform -->
-            <div class="sidebar-section">
-                <span class="section-label">CLOUD &amp; PLATFORM</span>
-                <nav class="nav-tree">
-                    <button class="nav-item" id="navDatabasesBtn" data-view-pane="pane-databases">
-                        <iconify-icon icon="lucide:server" class="nav-icon" width="16" style="color: #38bdf8;"></iconify-icon>
-                        <span class="nav-text">Databases &amp; Sharing</span>
-                        <span class="nav-count" id="sbDbsCountBadge">-</span>
-                    </button>
-                    <button class="nav-item" id="navCloudApiBtn" data-view-pane="pane-cloud-api">
-                        <iconify-icon icon="lucide:shield-check" class="nav-icon" width="16" style="color: #34d399;"></iconify-icon>
-                        <span class="nav-text">Cloud API &amp; RLS</span>
-                    </button>
-                    <button class="nav-item" id="navBenchmarkBtn" data-view-pane="pane-benchmark">
-                        <iconify-icon icon="lucide:gauge" class="nav-icon" width="16" style="color: #fbbf24;"></iconify-icon>
-                        <span class="nav-text">Stress Benchmark</span>
-                    </button>
-                </nav>
-            </div>
-
-            <!-- Management Tools -->
-            <div class="sidebar-section">
-                <span class="section-label">TOOLS & UTILITIES</span>
-                <nav class="nav-tree">
-                    <button class="nav-item" id="exportDataBtn">
-                        <iconify-icon icon="lucide:download" class="nav-icon" width="16"></iconify-icon>
-                        <span class="nav-text">Export JSON</span>
-                    </button>
-                    <button class="nav-item" id="importDataBtn">
-                        <iconify-icon icon="lucide:upload" class="nav-icon" width="16"></iconify-icon>
-                        <span class="nav-text">Import JSON</span>
-                        <input type="file" id="importFileInput" accept=".json" style="display: none;">
-                    </button>
-                    <button class="nav-item danger" id="flushDbBtn">
-                        <iconify-icon icon="lucide:trash-2" class="nav-icon" width="16"></iconify-icon>
-                        <span class="nav-text">Flush Database</span>
-                    </button>
-                </nav>
-            </div>
-
-            <!-- Sidebar Footer Stats -->
-            <div class="sidebar-footer">
-                <div class="server-telemetry-badge">
-                    <div class="telemetry-item">
-                        <span class="label">Memory</span>
-                        <span class="val" id="sbMemory">-</span>
-                    </div>
-                    <div class="telemetry-item">
-                        <span class="label">Commands</span>
-                        <span class="val" id="sbCommands">-</span>
-                    </div>
-                    <div class="telemetry-item">
-                        <span class="label">Uptime</span>
-                        <span class="val" id="sbUptime">-</span>
-                    </div>
-                </div>
-            </div>
-        </aside>
-
-        <!-- Main Studio Work Area -->
-        <div class="main-work-area">
-            <!-- Top App Bar -->
-            <header class="top-bar">
-                <div class="breadcrumb-container">
-                    <span class="bc-crumb">
-                        <iconify-icon icon="lucide:database" width="14" style="vertical-align: middle;"></iconify-icon>
-                        Database:
-                    </span>
-                    <div class="vdb-selector-wrapper">
-                        <select id="vdbSelect" class="vdb-select-dropdown" title="Select Virtual Database">
+                    <!-- Virtual DB Selector Pill -->
+                    <div class="flex items-center gap-1.5 ml-2.5 px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-700 hover:bg-gray-100 transition-colors">
+                        <iconify-icon icon="lucide:database" width="13" class="text-purple-600"></iconify-icon>
+                        <select id="vdbSelect" class="bg-transparent border-none text-xs font-semibold text-gray-800 focus:outline-none cursor-pointer pr-1">
                             <option value="default">db0 (Default Root)</option>
                         </select>
+                        <span id="activeDbRoleBadge" class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-700">OWNER</span>
                     </div>
-                    <span class="db-role-badge-pill" id="activeDbRoleBadge" title="Your role on active database">OWNER</span>
-                    <span class="bc-sep">/</span>
-                    <span class="bc-crumb active" id="currentViewBreadcrumb">All Records</span>
+                </div>
+            </div>
+
+            <!-- Top Actions -->
+            <div class="flex items-center gap-3">
+                <!-- Search in header -->
+                <div class="relative hidden lg:block">
+                    <iconify-icon icon="lucide:search" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" width="15"></iconify-icon>
+                    <input type="text" id="globalSearchInput" placeholder="Search keys, logs, commands..." class="pl-9 pr-3 py-1.5 w-64 bg-gray-50 border border-gray-200 rounded-md text-sm focus:outline-none focus:bg-white focus:border-purple-500 transition-all">
                 </div>
 
-                <div class="top-bar-actions">
-                    <button class="btn btn-connect btn-sm" id="openConnectModalBtn" title="Prisma, ioredis, Python, CLI connection URLs">
-                        <iconify-icon icon="lucide:link-2" width="14"></iconify-icon>
-                        Connect
+                <!-- Connect Button -->
+                <button id="openConnectModalBtn" class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 hover:bg-gray-50 rounded-md text-sm font-medium text-gray-700 transition-colors" title="Prisma, ioredis, Python, CLI URLs">
+                    <iconify-icon icon="lucide:link-2" width="15" class="text-purple-600"></iconify-icon>
+                    <span class="hidden sm:inline">Connect</span>
+                </button>
+
+                <!-- Live Sync Toggle -->
+                <div class="flex items-center gap-2 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-600">
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="autoPollCheck" checked class="sr-only peer">
+                        <div class="w-7 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-green-500"></div>
+                    </label>
+                    <span class="hidden md:inline font-medium">Live</span>
+                </div>
+
+                <!-- Manual Refresh -->
+                <button id="manualRefreshBtn" class="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors" title="Refresh Live Data">
+                    <iconify-icon icon="lucide:rotate-cw" width="16"></iconify-icon>
+                </button>
+
+                <!-- CLI Terminal Drawer Toggle -->
+                <button id="toggleTerminalBtn" class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 hover:bg-gray-50 rounded-md text-sm font-medium text-gray-700 transition-colors" title="Redis Interactive Terminal">
+                    <iconify-icon icon="lucide:terminal" width="15" class="text-gray-600"></iconify-icon>
+                    <span class="hidden sm:inline">CLI</span>
+                </button>
+
+                <!-- New Record Button -->
+                <button id="openInsertModalBtn" class="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-sm font-medium transition-colors shadow-sm">
+                    <iconify-icon icon="lucide:plus" width="15"></iconify-icon>
+                    <span>New Record</span>
+                </button>
+
+                <!-- Notifications Bell -->
+                <button class="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors" title="Notifications" onclick="showToast('No unread notifications')">
+                    <iconify-icon icon="lucide:bell" width="17"></iconify-icon>
+                    <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
+                </button>
+
+                <!-- User Profile Dropdown -->
+                <div class="relative">
+                    <button id="userProfileBtn" class="flex items-center gap-2 p-1 rounded-full hover:ring-2 hover:ring-purple-200 transition-all focus:outline-none">
+                        <img id="userAvatarImg" src="https://api.dicebear.com/7.x/identicon/svg?seed=Alex" alt="Avatar" class="w-8 h-8 rounded-full border border-gray-200 bg-gray-50 object-cover">
                     </button>
-
-                    <div class="live-pill">
-                        <label class="switch-sm">
-                            <input type="checkbox" id="autoPollCheck" checked>
-                            <span class="slider-sm"></span>
-                        </label>
-                        <span>Live Sync</span>
-                    </div>
-
-                    <button class="btn btn-secondary btn-sm" id="manualRefreshBtn">
-                        <iconify-icon icon="lucide:rotate-cw" width="14"></iconify-icon>
-                        Refresh
-                    </button>
-
-                    <button class="btn btn-secondary btn-sm" id="toggleTerminalBtn">
-                        <iconify-icon icon="lucide:terminal" width="14"></iconify-icon>
-                        Terminal CLI
-                    </button>
-
-                    <button class="btn btn-primary btn-sm" id="openInsertModalBtn">
-                        <iconify-icon icon="lucide:plus" width="15"></iconify-icon>
-                        Insert Record
-                    </button>
-
-                    <!-- User Profile Dropdown Menu -->
-                    <div class="user-profile-menu-container">
-                        <button class="user-profile-btn" id="userProfileBtn" title="Account Menu">
-                            <img id="userAvatarImg" src="https://api.dicebear.com/7.x/identicon/svg?seed=Alex" alt="Avatar" class="user-avatar-img">
-                            <span class="user-profile-name" id="userProfileName">Alex Rivera</span>
-                            <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
-                        </button>
-                        <div class="user-dropdown-card" id="userDropdownCard" style="display: none;">
-                            <div class="user-card-head">
-                                <img id="userDropdownAvatar" src="https://api.dicebear.com/7.x/identicon/svg?seed=Alex" class="user-dropdown-avatar">
-                                <div class="user-card-details">
-                                    <div class="user-card-name" id="userDropdownName">Alex Rivera</div>
-                                    <div class="user-card-email" id="userDropdownEmail">alex@rediscloud.dev</div>
-                                </div>
+                    <!-- Dropdown Menu -->
+                    <div id="userDropdownCard" class="hidden absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl py-2 z-50 animate-in fade-in zoom-in-95 duration-100">
+                        <div class="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+                            <img id="userDropdownAvatar" src="https://api.dicebear.com/7.x/identicon/svg?seed=Alex" class="w-10 h-10 rounded-full border border-gray-200">
+                            <div class="min-w-0 flex-1">
+                                <div id="userDropdownName" class="font-semibold text-sm text-gray-900 truncate">Alex Rivera</div>
+                                <div id="userDropdownEmail" class="text-xs text-gray-500 truncate">alex@rediscloud.dev</div>
                             </div>
-                            <div class="user-card-divider"></div>
-                            <button class="user-menu-item" id="menuMyDatabasesBtn">
-                                <iconify-icon icon="lucide:server" width="14" style="color: #38bdf8;"></iconify-icon>
+                        </div>
+                        <div class="py-1">
+                            <button class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2.5 transition-colors" onclick="navigateToPane('pane-overview')">
+                                <iconify-icon icon="lucide:home" width="15" class="text-gray-400"></iconify-icon>
+                                Dashboard Overview
+                            </button>
+                            <button id="menuMyDatabasesBtn" class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2.5 transition-colors">
+                                <iconify-icon icon="lucide:database" width="15" class="text-blue-500"></iconify-icon>
                                 Database Hub &amp; Sharing
                             </button>
-                            <button class="user-menu-item" id="menuSwitchAccountBtn">
-                                <iconify-icon icon="lucide:users" width="14" style="color: #a78bfa;"></iconify-icon>
+                            <button id="menuSwitchAccountBtn" class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2.5 transition-colors">
+                                <iconify-icon icon="lucide:users" width="15" class="text-purple-500"></iconify-icon>
                                 Switch Account (Demo)
                             </button>
-                            <div class="user-card-divider"></div>
-                            <button class="user-menu-item text-danger" id="menuSignOutBtn">
-                                <iconify-icon icon="lucide:log-out" width="14" style="color: #f87171;"></iconify-icon>
+                            <button class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2.5 transition-colors" onclick="navigateToPane('pane-settings')">
+                                <iconify-icon icon="lucide:settings" width="15" class="text-gray-400"></iconify-icon>
+                                Settings
+                            </button>
+                        </div>
+                        <div class="border-t border-gray-100 pt-1">
+                            <button id="menuSignOutBtn" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition-colors">
+                                <iconify-icon icon="lucide:log-out" width="15"></iconify-icon>
                                 Sign Out
                             </button>
                         </div>
                     </div>
                 </div>
-            </header>
+            </div>
+        </header>
 
-            <!-- Pane 1: Datasheet Grid Studio -->
-            <div class="studio-pane" id="pane-datasheet">
-                <!-- Datasheet Toolbar -->
-                <div class="datasheet-toolbar">
-                    <div class="search-box">
-                        <iconify-icon icon="lucide:search" width="15"></iconify-icon>
-                        <input type="text" id="filterSearchInput" placeholder="Filter by key name, prefix, or glob (e.g. user:*)...">
-                    </div>
-
-                    <div class="toolbar-filters">
-                        <select id="sortSelect" class="studio-select">
-                            <option value="key_asc">Sort: Key (A → Z)</option>
-                            <option value="key_desc">Sort: Key (Z → A)</option>
-                            <option value="size_desc">Sort: Size (High → Low)</option>
-                            <option value="ttl_asc">Sort: TTL (Expiring Soon)</option>
-                            <option value="created_desc">Sort: Recently Created</option>
-                        </select>
-
-                        <span class="record-counter" id="recordCounter">Showing 0 records</span>
-                    </div>
-
-                    <!-- Batch Selection Actions Bar (hidden by default) -->
-                    <div class="batch-bar" id="batchActionBar">
-                        <span class="batch-count" id="batchCountText">0 selected</span>
-                        <button class="btn btn-outline-danger btn-sm" id="batchDeleteBtn">
-                            <iconify-icon icon="lucide:trash-2" width="13"></iconify-icon>
-                            Delete Selected
+        <!-- Main Body: Sidebar + Main Content -->
+        <div class="flex flex-1 overflow-hidden">
+            <!-- Sidebar -->
+            <aside class="w-60 border-r border-gray-200 bg-white h-[calc(100vh-4rem)] flex flex-col justify-between overflow-y-auto shrink-0 select-none">
+                <div class="p-4 space-y-6">
+                    <!-- Sidebar Search Input -->
+                    <div class="relative">
+                        <iconify-icon icon="lucide:search" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" width="14"></iconify-icon>
+                        <input type="text" id="sidebarSearchInput" placeholder="Search anything..." class="w-full pl-9 pr-8 py-1.5 bg-gray-50 border border-gray-200 rounded-md text-xs focus:outline-none focus:bg-white focus:border-purple-500 text-gray-700 placeholder-gray-400 transition-colors">
+                        <button class="absolute right-1 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600" title="Quick Jump">
+                            <iconify-icon icon="lucide:arrow-right" width="13"></iconify-icon>
                         </button>
-                        <button class="btn btn-secondary btn-sm" id="batchCancelBtn">Deselect</button>
                     </div>
-                </div>
 
-                <!-- Datasheet Grid Table -->
-                <div class="grid-container">
-                    <table class="datasheet-table" id="datasheetTable">
-                        <thead>
-                            <tr>
-                                <th class="col-checkbox"><input type="checkbox" id="selectAllCheckbox"></th>
-                                <th class="col-num">#</th>
-                                <th class="col-key">Key Identifier</th>
-                                <th class="col-type">Data Type</th>
-                                <th class="col-preview">Value Preview</th>
-                                <th class="col-size">Size / Length</th>
-                                <th class="col-ttl">Time-To-Live (TTL)</th>
-                                <th class="col-actions">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="datasheetBody">
-                            <tr>
-                                <td colspan="8" class="table-loading">
-                                    <div class="loading-state">
-                                        <div class="studio-spinner"></div>
-                                        <span>Querying Redis database...</span>
-                                    </div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                    <!-- Main Navigation Group -->
+                    <nav class="space-y-1">
+                        <button class="nav-item flex items-center w-full justify-between px-3 py-2 rounded-md text-sm font-medium transition-colors bg-purple-50 text-purple-700 hover:bg-purple-100" data-view-pane="pane-overview">
+                            <div class="flex items-center gap-3">
+                                <iconify-icon icon="lucide:home" width="16"></iconify-icon>
+                                <span>Overview</span>
+                            </div>
+                        </button>
+                        <button class="nav-item flex items-center w-full justify-between px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors" data-view-pane="pane-datasheet" data-type-filter="ALL">
+                            <div class="flex items-center gap-3">
+                                <iconify-icon icon="lucide:layout-grid" width="16"></iconify-icon>
+                                <span>Datasheet</span>
+                            </div>
+                            <span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full font-medium" id="countAll">-</span>
+                        </button>
+                        <button class="nav-item flex items-center w-full justify-between px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors" id="navDatabasesBtn" data-view-pane="pane-databases">
+                            <div class="flex items-center gap-3">
+                                <iconify-icon icon="lucide:database" width="16" class="text-blue-500"></iconify-icon>
+                                <span>Databases Hub</span>
+                            </div>
+                            <span class="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium" id="sbDbsCountBadge">-</span>
+                        </button>
+                        <button class="nav-item flex items-center w-full justify-between px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors" data-view-pane="pane-analytics">
+                            <div class="flex items-center gap-3">
+                                <iconify-icon icon="lucide:bar-chart-3" width="16"></iconify-icon>
+                                <span>Analytics</span>
+                            </div>
+                        </button>
+                        <button class="nav-item flex items-center w-full justify-between px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors" id="navCloudApiBtn" data-view-pane="pane-cloud-api">
+                            <div class="flex items-center gap-3">
+                                <iconify-icon icon="lucide:shield-check" width="16" class="text-emerald-500"></iconify-icon>
+                                <span>Cloud API &amp; RLS</span>
+                            </div>
+                        </button>
+                        <button class="nav-item flex items-center w-full justify-between px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors" id="navBenchmarkBtn" data-view-pane="pane-benchmark">
+                            <div class="flex items-center gap-3">
+                                <iconify-icon icon="lucide:gauge" width="16" class="text-amber-500"></iconify-icon>
+                                <span>Stress Benchmark</span>
+                            </div>
+                        </button>
+                        <button class="nav-item flex items-center w-full justify-between px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors" data-view-pane="pane-team">
+                            <div class="flex items-center gap-3">
+                                <iconify-icon icon="lucide:users" width="16"></iconify-icon>
+                                <span>Team</span>
+                            </div>
+                        </button>
+                        <button class="nav-item flex items-center w-full justify-between px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors" data-view-pane="pane-settings">
+                            <div class="flex items-center gap-3">
+                                <iconify-icon icon="lucide:settings" width="16"></iconify-icon>
+                                <span>Settings</span>
+                            </div>
+                        </button>
+                    </nav>
 
-                <!-- Datasheet Pagination Bar -->
-                <div class="datasheet-pagination-bar" id="paginationBar">
-                    <div class="pag-left">
-                        <span class="pag-range-info" id="pagRangeInfo">Showing 0 – 0 of 0 records</span>
-                        <div class="pag-size-select-group">
-                            <span class="pag-lbl">Rows per page:</span>
-                            <select id="pagPageSizeSelect" class="studio-select pag-select">
-                                <option value="25">25</option>
-                                <option value="50" selected>50</option>
-                                <option value="100">100</option>
-                                <option value="250">250</option>
-                            </select>
+                    <!-- Data Types Filter Section -->
+                    <div class="space-y-2">
+                        <div class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-3">Data Types</div>
+                        <div class="space-y-0.5">
+                            <button class="nav-item flex items-center w-full justify-between px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors" data-view-pane="pane-datasheet" data-type-filter="string">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                                    <span>Strings</span>
+                                </div>
+                                <span class="text-[11px] text-gray-400" id="countStrings">-</span>
+                            </button>
+                            <button class="nav-item flex items-center w-full justify-between px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors" data-view-pane="pane-datasheet" data-type-filter="hash">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                                    <span>Hashes</span>
+                                </div>
+                                <span class="text-[11px] text-gray-400" id="countHashes">-</span>
+                            </button>
+                            <button class="nav-item flex items-center w-full justify-between px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors" data-view-pane="pane-datasheet" data-type-filter="list">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                                    <span>Lists</span>
+                                </div>
+                                <span class="text-[11px] text-gray-400" id="countLists">-</span>
+                            </button>
+                            <button class="nav-item flex items-center w-full justify-between px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors" data-view-pane="pane-datasheet" data-type-filter="set">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                    <span>Sets</span>
+                                </div>
+                                <span class="text-[11px] text-gray-400" id="countSets">-</span>
+                            </button>
                         </div>
                     </div>
 
-                    <div class="pag-center">
-                        <span class="pag-page-indicator">
-                            Page <strong id="pagCurrentPageNum">1</strong> of <strong id="pagTotalPagesNum">1</strong>
+                    <!-- Namespaces Hierarchy Section -->
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between px-3">
+                            <span class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Namespaces</span>
+                            <button id="refreshNamespacesBtn" class="text-gray-400 hover:text-gray-600 p-0.5" title="Refresh namespaces">
+                                <iconify-icon icon="lucide:rotate-cw" width="12"></iconify-icon>
+                            </button>
+                        </div>
+                        <div id="namespaceTreeList" class="space-y-0.5 text-xs text-gray-600">
+                            <div class="px-3 py-1 text-gray-400 italic">Scanning keys...</div>
+                        </div>
+                    </div>
+
+                    <!-- Tools Section -->
+                    <div class="space-y-2">
+                        <div class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-3">Tools &amp; Utilities</div>
+                        <div class="space-y-0.5">
+                            <button id="exportDataBtn" class="flex items-center w-full gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors">
+                                <iconify-icon icon="lucide:download" width="14" class="text-gray-500"></iconify-icon>
+                                <span>Export JSON</span>
+                            </button>
+                            <button id="importDataBtn" class="flex items-center w-full gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors">
+                                <iconify-icon icon="lucide:upload" width="14" class="text-gray-500"></iconify-icon>
+                                <span>Import JSON</span>
+                                <input type="file" id="importFileInput" accept=".json" class="hidden">
+                            </button>
+                            <button id="flushDbBtn" class="flex items-center w-full gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-red-600 hover:bg-red-50 transition-colors">
+                                <iconify-icon icon="lucide:trash-2" width="14" class="text-red-500"></iconify-icon>
+                                <span>Flush Database</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sidebar Footer Telemetry -->
+                <div class="p-4 border-t border-gray-200 bg-gray-50/50 space-y-2">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-gray-500">Memory:</span>
+                        <span class="font-semibold text-gray-800" id="sbMemory">-</span>
+                    </div>
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-gray-500">Commands:</span>
+                        <span class="font-semibold text-gray-800" id="sbCommands">-</span>
+                    </div>
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-gray-500">Uptime:</span>
+                        <span class="font-semibold text-gray-800" id="sbUptime">-</span>
+                    </div>
+                    <div class="pt-1.5 border-t border-gray-200 flex items-center justify-between text-[11px] text-gray-400">
+                        <span>Wire Port 6379</span>
+                        <span class="flex items-center gap-1 text-emerald-600 font-medium">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            Online
                         </span>
                     </div>
+                </div>
+            </aside>
 
-                    <div class="pag-right">
-                        <button class="pag-btn" id="pagFirstBtn" title="First Page">
-                            <iconify-icon icon="lucide:chevrons-left" width="16"></iconify-icon>
-                        </button>
-                        <button class="pag-btn" id="pagPrevBtn" title="Previous Page">
-                            <iconify-icon icon="lucide:chevron-left" width="16"></iconify-icon>
-                        </button>
+            <!-- Main Content Area -->
+            <main class="flex-1 p-8 bg-gray-50 overflow-y-auto h-[calc(100vh-4rem)]">
 
-                        <div class="pag-jump-group">
-                            <span class="pag-lbl">Go to:</span>
-                            <input type="number" id="pagJumpInput" class="studio-input pag-input" min="1" value="1">
+                <!-- ============================================================== -->
+                <!-- PANE 1: DASHBOARD OVERVIEW (Matching app/page.tsx from template) -->
+                <!-- ============================================================== -->
+                <div class="studio-pane space-y-8" id="pane-overview">
+                    <!-- Top Title & Quick Period Filter -->
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <div>
+                            <h1 class="text-2xl font-semibold text-gray-900 tracking-tight">Dashboard Overview</h1>
+                            <p class="text-gray-600 text-sm mt-1">Monitor your Redis databases, live throughput, and key-value performance</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div class="relative">
+                                <select id="overviewPeriodSelect" class="appearance-none bg-white border border-gray-200 rounded-md px-3 py-2 pr-8 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:border-purple-500 cursor-pointer shadow-sm">
+                                    <option value="7d">Last 7 days</option>
+                                    <option value="30d" selected>Last 30 days</option>
+                                    <option value="90d">Last 90 days</option>
+                                </select>
+                                <iconify-icon icon="lucide:chevron-down" class="absolute right-2.5 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" width="14"></iconify-icon>
+                            </div>
+                            <button class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 shadow-sm transition-colors" onclick="openInsertModal()">
+                                <iconify-icon icon="lucide:plus" width="16"></iconify-icon>
+                                <span>New Record</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Quick Action Cards (3-column layout matching template) -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <!-- Card 1: New Database / Record -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-md transition-all cursor-pointer group" onclick="openInsertModal()">
+                            <div class="flex items-center gap-4">
+                                <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center text-green-600 group-hover:scale-105 transition-transform">
+                                    <iconify-icon icon="lucide:plus" width="24"></iconify-icon>
+                                </div>
+                                <div>
+                                    <h3 class="font-medium text-gray-900 group-hover:text-purple-600 transition-colors">New Record</h3>
+                                    <p class="text-sm text-gray-600">Create a new key-value or namespace</p>
+                                </div>
+                            </div>
                         </div>
 
-                        <button class="pag-btn" id="pagNextBtn" title="Next Page">
-                            <iconify-icon icon="lucide:chevron-right" width="16"></iconify-icon>
-                        </button>
-                        <button class="pag-btn" id="pagLastBtn" title="Last Page">
-                            <iconify-icon icon="lucide:chevrons-right" width="16"></iconify-icon>
-                        </button>
+                        <!-- Card 2: Connect ORM / App -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-md transition-all cursor-pointer group" onclick="document.getElementById('openConnectModalBtn').click()">
+                            <div class="flex items-center gap-4">
+                                <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 group-hover:scale-105 transition-transform">
+                                    <iconify-icon icon="lucide:link-2" width="24"></iconify-icon>
+                                </div>
+                                <div>
+                                    <h3 class="font-medium text-gray-900 group-hover:text-purple-600 transition-colors">Connect ORM / App</h3>
+                                    <p class="text-sm text-gray-600">Prisma, ioredis, Python URLs</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 3: Stress Benchmark -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-md transition-all cursor-pointer group" onclick="navigateToPane('pane-benchmark')">
+                            <div class="flex items-center gap-4">
+                                <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center text-purple-600 group-hover:scale-105 transition-transform">
+                                    <iconify-icon icon="lucide:zap" width="24"></iconify-icon>
+                                </div>
+                                <div>
+                                    <h3 class="font-medium text-gray-900 group-hover:text-purple-600 transition-colors">Stress Benchmark</h3>
+                                    <p class="text-sm text-gray-600">Loom virtual threads throughput test</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Metrics Overview (4-column KPI cards matching template) -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <!-- KPI 1: Total Keys -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center text-purple-600">
+                                    <iconify-icon icon="lucide:database" width="20"></iconify-icon>
+                                </div>
+                                <div class="flex items-center gap-1 text-sm text-green-600 font-medium">
+                                    <iconify-icon icon="lucide:trending-up" width="14"></iconify-icon>
+                                    <span>+12%</span>
+                                </div>
+                            </div>
+                            <div class="text-2xl font-bold text-gray-900 mb-1" id="ovTotalKeys">0</div>
+                            <div class="text-sm text-gray-600">Total Key Records</div>
+                        </div>
+
+                        <!-- KPI 2: Throughput Ops/sec -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
+                                    <iconify-icon icon="lucide:activity" width="20"></iconify-icon>
+                                </div>
+                                <div class="flex items-center gap-1 text-sm text-green-600 font-medium">
+                                    <iconify-icon icon="lucide:trending-up" width="14"></iconify-icon>
+                                    <span>+4.2%</span>
+                                </div>
+                            </div>
+                            <div class="text-2xl font-bold text-gray-900 mb-1" id="ovOpsPerSec">128,450</div>
+                            <div class="text-sm text-gray-600">Pipelined Ops / Sec</div>
+                        </div>
+
+                        <!-- KPI 3: Avg Response Latency -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center text-amber-600">
+                                    <iconify-icon icon="lucide:clock" width="20"></iconify-icon>
+                                </div>
+                                <div class="flex items-center gap-1 text-sm text-green-600 font-medium">
+                                    <iconify-icon icon="lucide:trending-up" width="14"></iconify-icon>
+                                    <span>-0.12ms</span>
+                                </div>
+                            </div>
+                            <div class="text-2xl font-bold text-gray-900 mb-1" id="ovAvgLatency">0.28 ms</div>
+                            <div class="text-sm text-gray-600">Average Core Latency</div>
+                        </div>
+
+                        <!-- KPI 4: Active Virtual DBs & Team -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="w-10 h-10 bg-emerald-50 rounded-lg flex items-center justify-center text-emerald-600">
+                                    <iconify-icon icon="lucide:users" width="20"></iconify-icon>
+                                </div>
+                                <div class="flex items-center gap-1 text-sm text-green-600 font-medium">
+                                    <iconify-icon icon="lucide:trending-up" width="14"></iconify-icon>
+                                    <span>+2</span>
+                                </div>
+                            </div>
+                            <div class="text-2xl font-bold text-gray-900 mb-1" id="ovActiveDbs">3 DBs</div>
+                            <div class="text-sm text-gray-600">Active Databases &amp; Team</div>
+                        </div>
+                    </div>
+
+                    <!-- Main Overview Grid: Left (2 cols) & Right (1 col) -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <!-- Left Column: Performance Analytics & Recent Operations -->
+                        <div class="lg:col-span-2 space-y-8">
+                            <!-- Performance Analytics Card -->
+                            <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                <div class="p-6 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                                    <div>
+                                        <h3 class="text-lg font-semibold text-gray-900">Performance Analytics</h3>
+                                        <p class="text-sm text-gray-500 mt-0.5">Execution throughput and pipeline response trends</p>
+                                    </div>
+                                    <!-- Metric Tabs -->
+                                    <div class="flex bg-gray-100 p-1 rounded-lg text-xs font-medium">
+                                        <button class="px-3 py-1 rounded-md bg-white text-gray-900 shadow-sm" onclick="switchOverviewChartTab('throughput', this)">Throughput</button>
+                                        <button class="px-3 py-1 rounded-md text-gray-600 hover:text-gray-900" onclick="switchOverviewChartTab('commands', this)">Commands</button>
+                                        <button class="px-3 py-1 rounded-md text-gray-600 hover:text-gray-900" onclick="switchOverviewChartTab('latency', this)">Latency</button>
+                                    </div>
+                                </div>
+                                <div class="p-6">
+                                    <div class="h-80 w-full relative">
+                                        <canvas id="overviewChart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Recent Operations Table Card (Matching template) -->
+                            <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                <div class="p-6 border-b border-gray-100 flex items-center justify-between">
+                                    <div>
+                                        <h3 class="text-lg font-semibold text-gray-900">Recent Redis Operations</h3>
+                                        <p class="text-sm text-gray-500 mt-0.5">Live execution audit log and client command activity</p>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <button class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors" onclick="refreshRecentOperations()">
+                                            <iconify-icon icon="lucide:rotate-cw" width="13"></iconify-icon>
+                                            Refresh
+                                        </button>
+                                        <button class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors" onclick="navigateToPane('pane-datasheet')">
+                                            <iconify-icon icon="lucide:eye" width="13"></iconify-icon>
+                                            View Datasheet
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm">
+                                        <thead class="bg-gray-50 border-b border-gray-200 text-gray-700 font-medium text-xs">
+                                            <tr>
+                                                <th class="py-3 px-4">Run ID</th>
+                                                <th class="py-3 px-4">Operation</th>
+                                                <th class="py-3 px-4">Timestamp</th>
+                                                <th class="py-3 px-4">Duration</th>
+                                                <th class="py-3 px-4">Status</th>
+                                                <th class="py-3 px-4">Target Key</th>
+                                                <th class="py-3 px-4 w-10"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="overviewOperationsTableBody" class="divide-y divide-gray-100 text-gray-800">
+                                            <!-- Populated dynamically via JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column: Account Balance, Live Activity & Team Status -->
+                        <div class="space-y-6">
+                            <!-- Database Memory & Capacity Card (matches template Account Balance) -->
+                            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                                <h3 class="text-lg font-semibold text-gray-900 mb-3">Database Memory &amp; Capacity</h3>
+                                <div class="text-3xl font-bold text-gray-900 mb-4" id="ovMemoryUsageDisplay">14.2 MB</div>
+                                <div class="space-y-3 mb-5">
+                                    <div class="flex justify-between items-center text-sm">
+                                        <span class="text-gray-600">Memory Allocated</span>
+                                        <span class="font-medium text-gray-900" id="ovAllocatedMemory">256 MB Max</span>
+                                    </div>
+                                    <div class="flex justify-between items-center text-sm">
+                                        <span class="text-gray-600">Keyspace Hit Rate</span>
+                                        <span class="font-medium text-emerald-600">99.4%</span>
+                                    </div>
+                                    <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                                        <div class="bg-purple-600 h-2 rounded-full transition-all duration-500" id="ovMemoryProgressBar" style="width: 15%;"></div>
+                                    </div>
+                                    <div class="flex justify-between items-center text-xs text-gray-500">
+                                        <span>Virtual Database: <strong id="ovCurrentDbLabel" class="text-gray-800">db0</strong></span>
+                                        <span id="ovConnectedClients">12 Connections</span>
+                                    </div>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button class="flex-1 py-2 px-3 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-sm font-medium transition-colors shadow-sm text-center" onclick="document.getElementById('exportDataBtn').click()">
+                                        Export JSON
+                                    </button>
+                                    <button class="flex-1 py-2 px-3 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-md text-sm font-medium transition-colors text-center" onclick="document.getElementById('flushDbBtn').click()">
+                                        Flush DB
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Recent Activity Card (matches template Recent Activity) -->
+                            <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                <div class="p-4 border-b border-gray-100">
+                                    <h3 class="text-base font-semibold text-gray-900">Live Command Stream</h3>
+                                </div>
+                                <div class="divide-y divide-gray-100" id="ovRecentActivityStream">
+                                    <!-- Populated dynamically via JS -->
+                                </div>
+                            </div>
+
+                            <!-- Team Status Card (matches template Team Status) -->
+                            <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                <div class="p-4 border-b border-gray-100 flex items-center justify-between">
+                                    <h3 class="text-base font-semibold text-gray-900">Active Collaborators</h3>
+                                    <span class="text-xs bg-purple-50 text-purple-700 font-medium px-2 py-0.5 rounded-full">Team</span>
+                                </div>
+                                <div class="divide-y divide-gray-100" id="ovTeamStatusList">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Pane 2: Cloud REST API & RLS Security -->
-            <div class="studio-pane" id="pane-cloud-api" style="display: none;">
-                <div class="pane-content-scroll">
+                <!-- ============================================================== -->
+                <!-- PANE 2: DATASHEET GRID (Modernized with template styling) -->
+                <!-- ============================================================== -->
+                <div class="studio-pane space-y-4" id="pane-datasheet" style="display: none;">
+                    <!-- Datasheet Toolbar -->
+                    <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <!-- Search Box -->
+                        <div class="relative flex-1 max-w-md">
+                            <iconify-icon icon="lucide:search" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" width="16"></iconify-icon>
+                            <input type="text" id="filterSearchInput" placeholder="Filter by key name, prefix, or glob (e.g. user:*)..." class="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:bg-white focus:border-purple-500 transition-colors">
+                        </div>
+
+                        <!-- Right Filters & Actions -->
+                        <div class="flex items-center gap-3">
+                            <select id="sortSelect" class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-purple-500 shadow-sm cursor-pointer">
+                                <option value="key_asc">Sort: Key (A → Z)</option>
+                                <option value="key_desc">Sort: Key (Z → A)</option>
+                                <option value="size_desc">Sort: Size (High → Low)</option>
+                                <option value="ttl_asc">Sort: TTL (Expiring Soon)</option>
+                                <option value="created_desc">Sort: Recently Created</option>
+                            </select>
+
+                            <span class="text-xs text-gray-500 font-medium bg-gray-100 px-3 py-1.5 rounded-lg" id="recordCounter">Showing 0 records</span>
+
+                            <!-- Batch Bar -->
+                            <div class="hidden items-center gap-2 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-lg" id="batchActionBar">
+                                <span class="text-xs font-semibold text-purple-700" id="batchCountText">0 selected</span>
+                                <button class="flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium px-2 py-0.5 rounded hover:bg-red-50" id="batchDeleteBtn">
+                                    <iconify-icon icon="lucide:trash-2" width="13"></iconify-icon>
+                                    Delete
+                                </button>
+                                <button class="text-xs text-gray-600 hover:text-gray-800 font-medium px-2 py-0.5 rounded hover:bg-gray-200" id="batchCancelBtn">Deselect</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Datasheet Grid Table Card -->
+                    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div class="overflow-x-auto min-h-[420px]">
+                            <table class="w-full text-left text-sm" id="datasheetTable">
+                                <thead class="bg-gray-50 border-b border-gray-200 text-gray-700 font-medium text-xs uppercase tracking-wider">
+                                    <tr>
+                                        <th class="py-3 px-4 w-10 text-center"><input type="checkbox" id="selectAllCheckbox" class="rounded border-gray-300 text-purple-600 focus:ring-purple-500"></th>
+                                        <th class="py-3 px-4 w-12 text-center text-gray-400">#</th>
+                                        <th class="py-3 px-4">Key Identifier</th>
+                                        <th class="py-3 px-4">Data Type</th>
+                                        <th class="py-3 px-4">Value Preview</th>
+                                        <th class="py-3 px-4">Size</th>
+                                        <th class="py-3 px-4">TTL (Expiry)</th>
+                                        <th class="py-3 px-4 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="datasheetBody" class="divide-y divide-gray-100">
+                                    <tr>
+                                        <td colspan="8" class="py-12 text-center text-gray-500">
+                                            <div class="flex flex-col items-center justify-center gap-2">
+                                                <div class="w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                                                <span class="text-sm font-medium">Querying Redis database...</span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Datasheet Pagination Bar -->
+                        <div class="p-4 border-t border-gray-200 bg-gray-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4" id="paginationBar">
+                            <div class="flex items-center gap-4 text-xs text-gray-600">
+                                <span id="pagRangeInfo">Showing 0 – 0 of 0 records</span>
+                                <div class="flex items-center gap-1.5">
+                                    <span>Rows:</span>
+                                    <select id="pagPageSizeSelect" class="bg-white border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-purple-500 cursor-pointer">
+                                        <option value="25">25</option>
+                                        <option value="50" selected>50</option>
+                                        <option value="100">100</option>
+                                        <option value="250">250</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs text-gray-600">
+                                    Page <strong id="pagCurrentPageNum">1</strong> of <strong id="pagTotalPagesNum">1</strong>
+                                </span>
+                                <div class="flex items-center gap-1">
+                                    <button class="p-1 rounded border border-gray-200 bg-white hover:bg-gray-100 disabled:opacity-40" id="pagFirstBtn" title="First Page">
+                                        <iconify-icon icon="lucide:chevrons-left" width="15"></iconify-icon>
+                                    </button>
+                                    <button class="p-1 rounded border border-gray-200 bg-white hover:bg-gray-100 disabled:opacity-40" id="pagPrevBtn" title="Previous Page">
+                                        <iconify-icon icon="lucide:chevron-left" width="15"></iconify-icon>
+                                    </button>
+                                    <div class="flex items-center gap-1 mx-1 text-xs">
+                                        <span class="text-gray-500">Go:</span>
+                                        <input type="number" id="pagJumpInput" class="w-12 px-1.5 py-1 bg-white border border-gray-200 rounded text-center text-xs" min="1" value="1">
+                                    </div>
+                                    <button class="p-1 rounded border border-gray-200 bg-white hover:bg-gray-100 disabled:opacity-40" id="pagNextBtn" title="Next Page">
+                                        <iconify-icon icon="lucide:chevron-right" width="15"></iconify-icon>
+                                    </button>
+                                    <button class="p-1 rounded border border-gray-200 bg-white hover:bg-gray-100 disabled:opacity-40" id="pagLastBtn" title="Last Page">
+                                        <iconify-icon icon="lucide:chevrons-right" width="15"></iconify-icon>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- PANE 3: DATABASES HUB & SHARING (Modernized) -->
+                <!-- ============================================================== -->
+                <div class="studio-pane space-y-6" id="pane-databases" style="display: none;">
                     <!-- Banner -->
-                    <div class="pane-header-banner green-accent">
-                        <div class="banner-left">
-                            <span class="banner-badge green">
+                    <div class="bg-gradient-to-r from-blue-900 to-indigo-950 p-6 rounded-2xl text-white shadow-md flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+                        <div class="space-y-2">
+                            <span class="inline-flex items-center gap-1.5 bg-blue-500/20 text-blue-300 border border-blue-400/30 text-xs px-2.5 py-1 rounded-full font-medium">
+                                <iconify-icon icon="lucide:server" width="13"></iconify-icon>
+                                Cloud Redis Platform
+                            </span>
+                            <h2 class="text-2xl font-bold tracking-tight">Cloud Databases &amp; Team Collaboration</h2>
+                            <p class="text-blue-100/80 text-sm max-w-2xl">
+                                Create isolated Redis database instances, connect via Prisma and ioredis URLs, share databases with teammates by email with role permissions (Editor / Viewer), and access via serverless REST tokens.
+                            </p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button id="refreshDatabasesBtn" class="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-3.5 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+                                <iconify-icon icon="lucide:rotate-cw" width="14"></iconify-icon>
+                                Refresh
+                            </button>
+                            <button id="openCreateDbModalBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm">
+                                <iconify-icon icon="lucide:plus" width="15"></iconify-icon>
+                                New Database
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Database Hub Stats Ribbon -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                        <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="text-sm font-medium text-gray-500 mb-1">My Databases</div>
+                            <div class="text-2xl font-bold text-gray-900" id="statMyDbsCount">0</div>
+                            <div class="text-xs text-gray-400 mt-1">Databases you created &amp; own</div>
+                        </div>
+                        <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="text-sm font-medium text-gray-500 mb-1">Shared With Me</div>
+                            <div class="text-2xl font-bold text-purple-600" id="statSharedDbsCount">0</div>
+                            <div class="text-xs text-gray-400 mt-1">Team databases you collaborate on</div>
+                        </div>
+                        <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="text-sm font-medium text-gray-500 mb-1">Current Active DB</div>
+                            <div class="text-2xl font-bold text-blue-600" id="statActiveDbName">Default Root</div>
+                            <div class="text-xs text-gray-400 mt-1" id="statActiveDbRoleSub">Role: OWNER</div>
+                        </div>
+                    </div>
+
+                    <!-- Tabs: My Databases vs Shared With Me -->
+                    <div class="flex items-center gap-2 border-b border-gray-200 pb-2">
+                        <button class="db-tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors bg-purple-50 text-purple-700" id="tabMyDbsBtn" data-dbtab="my">
+                            <iconify-icon icon="lucide:database" width="16"></iconify-icon>
+                            <span>My Databases</span>
+                            <span class="text-xs bg-purple-200 text-purple-800 px-2 py-0.5 rounded-full" id="tabMyDbsBadge">0</span>
+                        </button>
+                        <button class="db-tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors" id="tabSharedDbsBtn" data-dbtab="shared">
+                            <iconify-icon icon="lucide:users" width="16"></iconify-icon>
+                            <span>Shared With Me</span>
+                            <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full" id="tabSharedDbsBadge">0</span>
+                        </button>
+                    </div>
+
+                    <!-- Database Cards Grid -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="databaseCardsContainer">
+                        <!-- Populated dynamically via JS -->
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- PANE 4: ANALYTICS (Matching app/analytics/page.tsx) -->
+                <!-- ============================================================== -->
+                <div class="studio-pane space-y-8" id="pane-analytics" style="display: none;">
+                    <!-- Header -->
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h1 class="text-2xl font-semibold text-gray-900 tracking-tight">Performance Analytics</h1>
+                            <p class="text-gray-600 text-sm mt-1">Monitor throughput, command latency, and execution outcomes</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <select id="analyticsTimeRange" class="bg-white border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-purple-500 cursor-pointer shadow-sm">
+                                <option value="7d">Last 7 days</option>
+                                <option value="30d" selected>Last 30 days</option>
+                                <option value="90d">Last 90 days</option>
+                            </select>
+                            <button class="flex items-center gap-2 px-3 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-md text-sm font-medium shadow-sm transition-colors" onclick="showToast('Exporting analytics report...')">
+                                <iconify-icon icon="lucide:download" width="15"></iconify-icon>
+                                Export
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- KPI Cards (4 cards) -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-gray-600">
+                                    <iconify-icon icon="lucide:activity" width="20"></iconify-icon>
+                                </div>
+                                <div class="flex items-center gap-1 text-sm text-green-600 font-medium">
+                                    <iconify-icon icon="lucide:trending-up" width="14"></iconify-icon>
+                                    <span>+12.5%</span>
+                                </div>
+                            </div>
+                            <div class="text-2xl font-bold text-gray-900 mb-1" id="anTotalExecutions">24,847</div>
+                            <div class="text-sm text-gray-600">Total Executions</div>
+                            <div class="text-xs text-gray-400 mt-1">This month</div>
+                        </div>
+
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-gray-600">
+                                    <iconify-icon icon="lucide:check-circle" width="20"></iconify-icon>
+                                </div>
+                                <div class="flex items-center gap-1 text-sm text-green-600 font-medium">
+                                    <iconify-icon icon="lucide:trending-up" width="14"></iconify-icon>
+                                    <span>+0.3%</span>
+                                </div>
+                            </div>
+                            <div class="text-2xl font-bold text-gray-900 mb-1">99.8%</div>
+                            <div class="text-sm text-gray-600">Success Rate</div>
+                            <div class="text-xs text-gray-400 mt-1">Last 30 days</div>
+                        </div>
+
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-gray-600">
+                                    <iconify-icon icon="lucide:clock" width="20"></iconify-icon>
+                                </div>
+                                <div class="flex items-center gap-1 text-sm text-green-600 font-medium">
+                                    <iconify-icon icon="lucide:trending-up" width="14"></iconify-icon>
+                                    <span>-0.08ms</span>
+                                </div>
+                            </div>
+                            <div class="text-2xl font-bold text-gray-900 mb-1">0.32 ms</div>
+                            <div class="text-sm text-gray-600">Avg Duration</div>
+                            <div class="text-xs text-gray-400 mt-1">Per transaction</div>
+                        </div>
+
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-gray-600">
+                                    <iconify-icon icon="lucide:x-circle" width="20"></iconify-icon>
+                                </div>
+                                <div class="flex items-center gap-1 text-sm text-green-600 font-medium">
+                                    <iconify-icon icon="lucide:trending-up" width="14"></iconify-icon>
+                                    <span>-0.2%</span>
+                                </div>
+                            </div>
+                            <div class="text-2xl font-bold text-gray-900 mb-1">0.2%</div>
+                            <div class="text-sm text-gray-600">Error Rate</div>
+                            <div class="text-xs text-gray-400 mt-1">Nil failures recorded</div>
+                        </div>
+                    </div>
+
+                    <!-- Charts Grid -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Chart 1: Execution Trends -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="mb-4">
+                                <h3 class="text-base font-semibold text-gray-900">Execution Trends</h3>
+                                <p class="text-xs text-gray-500">Total Redis operations over time</p>
+                            </div>
+                            <div class="h-72 relative">
+                                <canvas id="analyticsExecTrendsChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Chart 2: Success vs Failed Outcomes -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="mb-4">
+                                <h3 class="text-base font-semibold text-gray-900">Success vs Failed Outcomes</h3>
+                                <p class="text-xs text-gray-500">Command status breakdown</p>
+                            </div>
+                            <div class="h-72 relative">
+                                <canvas id="analyticsSuccessChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Grid: Namespace Distribution & Latency Percentiles -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Namespace Distribution -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="mb-4">
+                                <h3 class="text-base font-semibold text-gray-900">Keyspace Namespace Distribution</h3>
+                                <p class="text-xs text-gray-500">Distribution of keys by root prefix</p>
+                            </div>
+                            <div class="h-64 relative flex items-center justify-center">
+                                <canvas id="analyticsDistributionChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Top Namespaces Breakdown Table -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="mb-4">
+                                <h3 class="text-base font-semibold text-gray-900">Top Performing Namespaces</h3>
+                                <p class="text-xs text-gray-500">Active read/write activity by key family</p>
+                            </div>
+                            <div class="space-y-4" id="analyticsNamespacesList">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- PANE 5: CLOUD REST API & RLS SECURITY (Modernized) -->
+                <!-- ============================================================== -->
+                <div class="studio-pane space-y-6" id="pane-cloud-api" style="display: none;">
+                    <!-- Banner -->
+                    <div class="bg-gradient-to-r from-emerald-900 to-teal-950 p-6 rounded-2xl text-white shadow-md flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+                        <div class="space-y-2">
+                            <span class="inline-flex items-center gap-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-xs px-2.5 py-1 rounded-full font-medium">
                                 <iconify-icon icon="lucide:shield-check" width="13"></iconify-icon>
                                 Cloud Edge API &amp; RLS Active
                             </span>
-                            <h2 class="banner-title">Serverless HTTP REST API &amp; Key-Level Security (RLS)</h2>
-                            <p class="banner-desc">
+                            <h2 class="text-2xl font-bold tracking-tight">Serverless HTTP REST API &amp; Key-Level Security (RLS)</h2>
+                            <p class="text-emerald-100/80 text-sm max-w-2xl">
                                 Execute low-latency KV commands over standard HTTP REST endpoints with Bearer Token authentication. Fine-grained Access Control Lists (ACL) and Row/Key-Level Security (RLS) patterns isolate and safeguard tenant namespaces.
                             </p>
                         </div>
                         <div>
-                            <button class="btn btn-secondary btn-sm" id="refreshAclBtn">
+                            <button id="refreshAclBtn" class="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-3.5 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
                                 <iconify-icon icon="lucide:rotate-cw" width="14"></iconify-icon>
                                 Reload Accounts
                             </button>
                         </div>
                     </div>
 
-                    <div class="cloud-api-grid">
-                        <!-- Left: Service Accounts & Tokens -->
-                        <div class="studio-card">
-                            <div class="card-header-bar">
-                                <span class="card-header-title">
-                                    <iconify-icon icon="lucide:users" width="16" style="color: #38bdf8;"></iconify-icon>
+                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                        <!-- Left: Service Accounts & Tokens (4 cols) -->
+                        <div class="lg:col-span-5 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+                            <div class="p-4 border-b border-gray-100 flex items-center justify-between">
+                                <div class="flex items-center gap-2 font-semibold text-gray-900 text-sm">
+                                    <iconify-icon icon="lucide:users" width="16" class="text-blue-500"></iconify-icon>
                                     Configured Accounts &amp; Tokens
-                                </span>
-                                <span class="badge-type" style="font-size: 0.65rem;">ACL Engine</span>
+                                </div>
+                                <span class="text-[10px] font-bold uppercase tracking-wider bg-gray-100 text-gray-600 px-2 py-0.5 rounded">ACL Engine</span>
                             </div>
-                            <div class="card-body" id="aclUserListContainer">
-                                <div class="table-loading">Loading ACL users...</div>
+                            <div class="p-4 overflow-y-auto max-h-[560px]" id="aclUserListContainer">
+                                <div class="text-center py-8 text-gray-500 text-sm">Loading ACL users...</div>
                             </div>
                         </div>
 
-                        <!-- Right: Interactive Cloud API Explorer -->
-                        <div class="studio-card">
-                            <div class="card-header-bar">
-                                <span class="card-header-title">
-                                    <iconify-icon icon="lucide:play-circle" width="16" style="color: #34d399;"></iconify-icon>
+                        <!-- Right: Interactive Cloud API Request Playground (7 cols) -->
+                        <div class="lg:col-span-7 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+                            <div class="p-4 border-b border-gray-100 flex items-center justify-between">
+                                <div class="flex items-center gap-2 font-semibold text-gray-900 text-sm">
+                                    <iconify-icon icon="lucide:play-circle" width="16" class="text-emerald-500"></iconify-icon>
                                     Interactive Cloud API Request Playground
-                                </span>
-                                <span class="badge-type" style="font-size: 0.65rem;">HTTP REST /v1/</span>
+                                </div>
+                                <span class="text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded">HTTP REST /v1/</span>
                             </div>
-                            <div class="card-body">
-                                <div class="studio-form-group">
-                                    <label>Select API Endpoint</label>
-                                    <select id="apiEndpointSelect" class="studio-input">
+                            <div class="p-6 space-y-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1.5">Select API Endpoint</label>
+                                    <select id="apiEndpointSelect" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm cursor-pointer">
                                         <option value="GET_KEY">GET /v1/get/:key (Retrieve String or JSON)</option>
                                         <option value="SET_KEY">POST /v1/set (Set Key &amp; Optional TTL)</option>
                                         <option value="LPUSH">POST /v1/lpush (Prepend values to List)</option>
@@ -390,96 +954,96 @@
                                     </select>
                                 </div>
 
-                                <div class="tester-form-row">
-                                    <div class="studio-form-group">
-                                        <label>Auth Token</label>
-                                        <select id="apiTokenSelect" class="studio-input">
+                                <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                                    <div class="sm:col-span-5">
+                                        <label class="block text-xs font-semibold text-gray-700 mb-1.5">Auth Token</label>
+                                        <select id="apiTokenSelect" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm cursor-pointer">
                                             <option value="tok_admin_live_secret">admin (tok_admin...)</option>
                                             <option value="tok_app_tenant">tenant-app (tok_app...)</option>
                                             <option value="tok_ro_public">readonly (tok_ro...)</option>
                                             <option value="custom">Custom Token...</option>
                                         </select>
                                     </div>
-                                    <div class="studio-form-group" id="apiKeyInputGroup">
-                                        <label>Target Key</label>
-                                        <input type="text" id="apiTargetKey" class="studio-input" value="app:user:101" placeholder="e.g. app:session:xyz or greetings">
+                                    <div class="sm:col-span-5" id="apiKeyInputGroup">
+                                        <label class="block text-xs font-semibold text-gray-700 mb-1.5">Target Key</label>
+                                        <input type="text" id="apiTargetKey" value="app:user:101" placeholder="e.g. app:session:xyz" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm">
                                     </div>
-                                    <div class="studio-form-group" style="justify-content: flex-end;">
-                                        <button class="btn btn-primary" id="apiExecuteBtn" style="height: 38px;">
+                                    <div class="sm:col-span-2 flex items-end">
+                                        <button id="apiExecuteBtn" class="w-full h-[38px] bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-sm">
                                             <iconify-icon icon="lucide:send" width="14"></iconify-icon>
                                             Send
                                         </button>
                                     </div>
                                 </div>
 
-                                <div class="studio-form-group" id="apiCustomTokenGroup" style="display: none;">
-                                    <label>Custom Bearer Token</label>
-                                    <input type="text" id="apiCustomTokenInput" class="studio-input" placeholder="Paste custom Bearer token...">
+                                <div id="apiCustomTokenGroup" class="hidden">
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1.5">Custom Bearer Token</label>
+                                    <input type="text" id="apiCustomTokenInput" placeholder="Paste custom Bearer token..." class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-purple-500 shadow-sm">
                                 </div>
 
-                                <div class="studio-form-group" id="apiBodyGroup">
-                                    <label>Request JSON Payload</label>
-                                    <textarea id="apiRequestBody" class="studio-input textarea" rows="4" placeholder="{ ... }"></textarea>
+                                <div id="apiBodyGroup">
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1.5">Request JSON Payload</label>
+                                    <textarea id="apiRequestBody" rows="3" placeholder="{ ... }" class="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs font-mono text-gray-800 focus:outline-none focus:bg-white focus:border-purple-500 shadow-sm"></textarea>
                                 </div>
 
-                                <div class="studio-form-group">
-                                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <label>Generated cURL Command</label>
-                                        <button class="btn-icon-copy" id="copyCurlBtn" title="Copy cURL to clipboard">
-                                            <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
-                                            <span style="font-size: 0.72rem; margin-left: 0.25rem;">Copy cURL</span>
+                                <div>
+                                    <div class="flex items-center justify-between mb-1.5">
+                                        <label class="text-xs font-semibold text-gray-700">Generated cURL Command</label>
+                                        <button id="copyCurlBtn" class="text-xs text-purple-600 hover:text-purple-800 font-medium flex items-center gap-1">
+                                            <iconify-icon icon="lucide:copy" width="12"></iconify-icon>
+                                            Copy cURL
                                         </button>
                                     </div>
-                                    <div class="curl-snippet-box">
-                                        <span class="curl-text" id="apiCurlSnippet">curl -H "Authorization: Bearer tok_admin_live_secret" http://localhost:8080/v1/get/app:user:101</span>
+                                    <div class="bg-gray-900 text-gray-100 rounded-lg p-3 text-xs font-mono overflow-x-auto shadow-inner">
+                                        <span id="apiCurlSnippet">curl -H "Authorization: Bearer tok_admin_live_secret" http://localhost:8080/v1/get/app:user:101</span>
                                     </div>
                                 </div>
 
-                                <div class="studio-form-group">
-                                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <label>Response Output</label>
-                                        <div id="apiResponseStatus" style="font-size: 0.75rem; font-weight: 700;">-</div>
+                                <div>
+                                    <div class="flex items-center justify-between mb-1.5">
+                                        <label class="text-xs font-semibold text-gray-700">Response Output</label>
+                                        <span id="apiResponseStatus" class="text-xs font-bold text-gray-500">-</span>
                                     </div>
-                                    <div class="code-output-box" id="apiResponseBox">// Click 'Send' to dispatch request...</div>
+                                    <pre id="apiResponseBox" class="bg-gray-900 text-emerald-400 rounded-lg p-4 text-xs font-mono overflow-x-auto min-h-[120px] max-h-[220px] shadow-inner">// Click 'Send' to dispatch request...</pre>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Pane 3: Virtual Thread Benchmark & Stress Engine -->
-            <div class="studio-pane" id="pane-benchmark" style="display: none;">
-                <div class="pane-content-scroll">
+                <!-- ============================================================== -->
+                <!-- PANE 6: STRESS BENCHMARK (Modernized) -->
+                <!-- ============================================================== -->
+                <div class="studio-pane space-y-6" id="pane-benchmark" style="display: none;">
                     <!-- Banner -->
-                    <div class="pane-header-banner amber-accent">
-                        <div class="banner-left">
-                            <span class="banner-badge amber">
+                    <div class="bg-gradient-to-r from-amber-900 to-orange-950 p-6 rounded-2xl text-white shadow-md flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+                        <div class="space-y-2">
+                            <span class="inline-flex items-center gap-1.5 bg-amber-500/20 text-amber-300 border border-amber-400/30 text-xs px-2.5 py-1 rounded-full font-medium">
                                 <iconify-icon icon="lucide:gauge" width="13"></iconify-icon>
                                 Java 25 Loom Virtual Threads
                             </span>
-                            <h2 class="banner-title">Virtual Thread Concurrency Benchmark</h2>
-                            <p class="banner-desc">
-                                Stress test Redis core throughput and pipeline latency using thousands of non-blocking Java 25 Virtual Threads. Evaluates pipelined SET &amp; GET transactions with full percentile breakdown (P50, P90, P99).
+                            <h2 class="text-2xl font-bold tracking-tight">Virtual Thread Concurrency Benchmark</h2>
+                            <p class="text-amber-100/80 text-sm max-w-2xl">
+                                Stress test Redis core throughput and pipeline latency using non-blocking Java 25 Virtual Threads. Evaluates pipelined SET &amp; GET transactions with full percentile breakdown (P50, P90, P99).
                             </p>
                         </div>
                     </div>
 
-                    <!-- Controls Bar -->
-                    <div class="bench-controls-bar">
-                        <div class="bench-options-group">
-                            <div class="bench-opt-item">
-                                <label>Total Operations</label>
-                                <select id="benchOpsSelect" class="studio-select">
+                    <!-- Benchmark Controls Bar -->
+                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <div class="flex flex-wrap items-center gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-700 mb-1">Total Operations</label>
+                                <select id="benchOpsSelect" class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm cursor-pointer">
                                     <option value="10000">10,000 Operations</option>
                                     <option value="25000" selected>25,000 Operations</option>
                                     <option value="50000">50,000 Operations</option>
                                     <option value="100000">100,000 Operations</option>
                                 </select>
                             </div>
-                            <div class="bench-opt-item">
-                                <label>Concurrency (Virtual Threads)</label>
-                                <select id="benchConcurrencySelect" class="studio-select">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-700 mb-1">Concurrency (Loom Threads)</label>
+                                <select id="benchConcurrencySelect" class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm cursor-pointer">
                                     <option value="10">10 Virtual Threads</option>
                                     <option value="25">25 Virtual Threads</option>
                                     <option value="50" selected>50 Virtual Threads</option>
@@ -490,525 +1054,652 @@
                         </div>
 
                         <div>
-                            <button class="btn btn-primary" id="startBenchmarkBtn" style="padding: 0.65rem 1.4rem;">
+                            <button id="startBenchmarkBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm transition-colors">
                                 <iconify-icon icon="lucide:zap" width="16"></iconify-icon>
                                 Start Stress Test
                             </button>
                         </div>
                     </div>
 
-                    <!-- Metrics Grid -->
-                    <div class="bench-hero-grid">
-                        <div class="bench-stat-card hero">
-                            <div class="stat-head">
-                                <span>THROUGHPUT</span>
-                                <iconify-icon icon="lucide:zap" width="18" style="color: #34d399;"></iconify-icon>
-                            </div>
-                            <div class="stat-num" id="benchOpsPerSec">0</div>
-                            <div class="stat-sub">Operations per Second</div>
+                    <!-- Hero Stats Grid -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Throughput</div>
+                            <div class="text-3xl font-extrabold text-emerald-600 mb-1" id="benchOpsPerSec">0</div>
+                            <div class="text-xs text-gray-500">Operations per second</div>
                         </div>
 
-                        <div class="bench-stat-card">
-                            <div class="stat-head">
-                                <span>TOTAL DURATION</span>
-                                <iconify-icon icon="lucide:clock" width="18" style="color: var(--accent-blue);"></iconify-icon>
-                            </div>
-                            <div class="stat-num" id="benchDuration">0 ms</div>
-                            <div class="stat-sub">End-to-end execution time</div>
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Total Duration</div>
+                            <div class="text-3xl font-extrabold text-blue-600 mb-1" id="benchDuration">0 ms</div>
+                            <div class="text-xs text-gray-500">End-to-end execution time</div>
                         </div>
 
-                        <div class="bench-stat-card">
-                            <div class="stat-head">
-                                <span>COMPLETED OPS</span>
-                                <iconify-icon icon="lucide:check-circle-2" width="18" style="color: var(--accent-purple);"></iconify-icon>
-                            </div>
-                            <div class="stat-num" id="benchCompletedOps">0</div>
-                            <div class="stat-sub">50% SET / 50% GET pipelined</div>
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Completed Ops</div>
+                            <div class="text-3xl font-extrabold text-purple-600 mb-1" id="benchCompletedOps">0</div>
+                            <div class="text-xs text-gray-500">50% SET / 50% GET pipelined</div>
                         </div>
 
-                        <div class="bench-stat-card">
-                            <div class="stat-head">
-                                <span>THREAD MODEL</span>
-                                <iconify-icon icon="lucide:cpu" width="18" style="color: var(--accent-amber);"></iconify-icon>
-                            </div>
-                            <div class="stat-num" id="benchConcurrencyLabel">50 Threads</div>
-                            <div class="stat-sub">Non-blocking Virtual Threads</div>
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Thread Model</div>
+                            <div class="text-3xl font-extrabold text-amber-600 mb-1" id="benchConcurrencyLabel">50 Threads</div>
+                            <div class="text-xs text-gray-500">Non-blocking Virtual Threads</div>
                         </div>
                     </div>
 
-                    <!-- Latency Distribution Card -->
-                    <div class="studio-card">
-                        <div class="card-header-bar">
-                            <span class="card-header-title">
-                                <iconify-icon icon="lucide:bar-chart-2" width="16" style="color: #38bdf8;"></iconify-icon>
-                                Latency Distribution Breakdown (Percentiles)
-                            </span>
-                            <span class="badge-type" style="font-size: 0.65rem;">Millisecond Precision</span>
+                    <!-- Latency Distribution Breakdown Card -->
+                    <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-base font-semibold text-gray-900">Latency Distribution Breakdown (Percentiles)</h3>
+                            <span class="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">Millisecond Precision</span>
                         </div>
-                        <div class="card-body">
-                            <div class="latency-grid">
-                                <div class="latency-item">
-                                    <span class="latency-tag">P50 (Median)</span>
-                                    <span class="latency-val" id="benchP50">-</span>
-                                    <span class="latency-sub">50% requests faster</span>
-                                </div>
-                                <div class="latency-item">
-                                    <span class="latency-tag">P90</span>
-                                    <span class="latency-val" id="benchP90">-</span>
-                                    <span class="latency-sub">90% requests faster</span>
-                                </div>
-                                <div class="latency-item">
-                                    <span class="latency-tag" style="color: #ff4757;">P99 (Tail)</span>
-                                    <span class="latency-val" id="benchP99" style="color: #ff4757;">-</span>
-                                    <span class="latency-sub">99% requests faster</span>
-                                </div>
-                                <div class="latency-item">
-                                    <span class="latency-tag" style="color: var(--accent-green);">Min Latency</span>
-                                    <span class="latency-val" id="benchMin" style="color: var(--accent-green);">-</span>
-                                    <span class="latency-sub">Fastest recorded op</span>
-                                </div>
-                                <div class="latency-item">
-                                    <span class="latency-tag" style="color: var(--accent-amber);">Max Latency</span>
-                                    <span class="latency-val" id="benchMax" style="color: var(--accent-amber);">-</span>
-                                    <span class="latency-sub">Slowest recorded op</span>
-                                </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                            <div class="p-4 bg-gray-50 rounded-xl border border-gray-100 text-center">
+                                <span class="text-xs font-semibold text-gray-500">P50 (Median)</span>
+                                <div class="text-2xl font-bold text-gray-900 mt-1" id="benchP50">-</div>
+                                <span class="text-[11px] text-gray-400">50% faster</span>
+                            </div>
+                            <div class="p-4 bg-gray-50 rounded-xl border border-gray-100 text-center">
+                                <span class="text-xs font-semibold text-gray-500">P90</span>
+                                <div class="text-2xl font-bold text-gray-900 mt-1" id="benchP90">-</div>
+                                <span class="text-[11px] text-gray-400">90% faster</span>
+                            </div>
+                            <div class="p-4 bg-red-50 rounded-xl border border-red-100 text-center">
+                                <span class="text-xs font-semibold text-red-600">P99 (Tail)</span>
+                                <div class="text-2xl font-bold text-red-600 mt-1" id="benchP99">-</div>
+                                <span class="text-[11px] text-red-400">99% faster</span>
+                            </div>
+                            <div class="p-4 bg-emerald-50 rounded-xl border border-emerald-100 text-center">
+                                <span class="text-xs font-semibold text-emerald-600">Min Latency</span>
+                                <div class="text-2xl font-bold text-emerald-600 mt-1" id="benchMin">-</div>
+                                <span class="text-[11px] text-emerald-500">Fastest op</span>
+                            </div>
+                            <div class="p-4 bg-amber-50 rounded-xl border border-amber-100 text-center">
+                                <span class="text-xs font-semibold text-amber-600">Max Latency</span>
+                                <div class="text-2xl font-bold text-amber-600 mt-1" id="benchMax">-</div>
+                                <span class="text-[11px] text-amber-500">Slowest op</span>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Pane 3: User Databases & Sharing Hub -->
-            <div class="studio-pane" id="pane-databases" style="display: none;">
-                <div class="pane-content-scroll">
-                    <!-- Banner -->
-                    <div class="pane-header-banner blue-accent">
-                        <div class="banner-left">
-                            <span class="banner-badge blue">
-                                <iconify-icon icon="lucide:server" width="13"></iconify-icon>
-                                Cloud Redis Platform
-                            </span>
-                            <h2 class="banner-title">Cloud Databases &amp; Team Collaboration</h2>
-                            <p class="banner-desc">
-                                Create isolated Redis database instances, connect via Prisma and ioredis URLs, share databases with teammates by email with role permissions (Editor / Viewer), and access via serverless REST tokens.
-                            </p>
+                <!-- ============================================================== -->
+                <!-- PANE 7: TEAM (Matching app/team/page.tsx from template) -->
+                <!-- ============================================================== -->
+                <div class="studio-pane space-y-8" id="pane-team" style="display: none;">
+                    <!-- Header -->
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h1 class="text-2xl font-semibold text-gray-900 tracking-tight">Team</h1>
+                            <p class="text-gray-600 text-sm mt-1">Manage your team members and their database permissions</p>
                         </div>
-                        <div class="banner-actions">
-                            <button class="btn btn-secondary btn-sm" id="refreshDatabasesBtn">
-                                <iconify-icon icon="lucide:rotate-cw" width="14"></iconify-icon>
-                                Refresh
-                            </button>
-                            <button class="btn btn-primary btn-sm" id="openCreateDbModalBtn">
-                                <iconify-icon icon="lucide:plus" width="14"></iconify-icon>
-                                New Database
+                        <div class="flex items-center gap-3">
+                            <button class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 shadow-sm transition-colors" onclick="openShareModal(activeVirtualDb)">
+                                <iconify-icon icon="lucide:user-plus" width="16"></iconify-icon>
+                                Invite Member
                             </button>
                         </div>
                     </div>
 
-                    <!-- Database Hub Stats Ribbon -->
-                    <div class="benchmark-stats-grid" style="margin-bottom: 1.25rem;">
-                        <div class="stat-card">
-                            <span class="stat-lbl">My Databases</span>
-                            <span class="stat-val highlight" id="statMyDbsCount">0</span>
-                            <span class="stat-sub">Databases you created &amp; own</span>
+                    <!-- Team Stats (4 cards) -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
+                            <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                                <iconify-icon icon="lucide:user" width="22"></iconify-icon>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-gray-900">5</div>
+                                <div class="text-sm text-gray-600">Total Members</div>
+                            </div>
                         </div>
-                        <div class="stat-card">
-                            <span class="stat-lbl">Shared With Me</span>
-                            <span class="stat-val" id="statSharedDbsCount" style="color: #a78bfa;">0</span>
-                            <span class="stat-sub">Team databases you collaborate on</span>
+
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
+                            <div class="w-12 h-12 bg-green-50 text-green-600 rounded-xl flex items-center justify-center">
+                                <span class="w-3 h-3 rounded-full bg-green-500"></span>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-gray-900">3</div>
+                                <div class="text-sm text-gray-600">Online Now</div>
+                            </div>
                         </div>
-                        <div class="stat-card">
-                            <span class="stat-lbl">Current Active DB</span>
-                            <span class="stat-val" id="statActiveDbName" style="color: #38bdf8;">Production Cache</span>
-                            <span class="stat-sub" id="statActiveDbRoleSub">Role: OWNER</span>
+
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
+                            <div class="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center">
+                                <iconify-icon icon="lucide:crown" width="22"></iconify-icon>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-gray-900">2</div>
+                                <div class="text-sm text-gray-600">Admins &amp; Owners</div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
+                            <div class="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
+                                <iconify-icon icon="lucide:user-plus" width="22"></iconify-icon>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-gray-900">2</div>
+                                <div class="text-sm text-gray-600">Pending Invites</div>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Tabs: My Databases vs Shared With Me -->
-                    <div class="db-tabs-bar">
-                        <button class="db-tab-btn active" id="tabMyDbsBtn" data-dbtab="my">
-                            <iconify-icon icon="lucide:database" width="15"></iconify-icon>
-                            <span>My Databases</span>
-                            <span class="db-tab-badge" id="tabMyDbsBadge">0</span>
-                        </button>
-                        <button class="db-tab-btn" id="tabSharedDbsBtn" data-dbtab="shared">
-                            <iconify-icon icon="lucide:users" width="15"></iconify-icon>
-                            <span>Shared With Me</span>
-                            <span class="db-tab-badge" id="tabSharedDbsBadge">0</span>
-                        </button>
+                    <!-- Team Tabs -->
+                    <div class="space-y-6">
+                        <div class="flex items-center gap-2 border-b border-gray-200 pb-2">
+                            <button class="team-tab-btn px-4 py-2 rounded-lg text-sm font-semibold transition-colors bg-purple-50 text-purple-700" onclick="switchTeamTab('members', this)">Team Members</button>
+                            <button class="team-tab-btn px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors" onclick="switchTeamTab('invitations', this)">Invitations</button>
+                            <button class="team-tab-btn px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors" onclick="switchTeamTab('roles', this)">Roles &amp; Permissions</button>
+                        </div>
+
+                        <!-- Tab Content: Members -->
+                        <div id="teamTabMembers" class="space-y-4">
+                            <!-- Members List dynamically populated -->
+                        </div>
+
+                        <!-- Tab Content: Invitations -->
+                        <div id="teamTabInvitations" class="space-y-4 hidden">
+                            <!-- Invitations list -->
+                        </div>
+
+                        <!-- Tab Content: Roles -->
+                        <div id="teamTabRoles" class="space-y-4 hidden">
+                            <!-- Roles breakdown -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- PANE 8: SETTINGS (Matching app/settings/page.tsx from template) -->
+                <!-- ============================================================== -->
+                <div class="studio-pane space-y-8" id="pane-settings" style="display: none;">
+                    <div>
+                        <h1 class="text-2xl font-semibold text-gray-900 tracking-tight">Settings</h1>
+                        <p class="text-gray-600 text-sm mt-1">Manage your account preferences, database security, and cloud configuration</p>
                     </div>
 
-                    <!-- Cards Container -->
-                    <div class="databases-cards-grid" id="databaseCardsContainer">
-                        <!-- Populated dynamically via JS -->
+                    <div class="space-y-6">
+                        <div class="flex items-center gap-2 border-b border-gray-200 pb-2">
+                            <button class="settings-tab-btn px-4 py-2 rounded-lg text-sm font-semibold transition-colors bg-purple-50 text-purple-700" onclick="switchSettingsTab('profile', this)">Profile</button>
+                            <button class="settings-tab-btn px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors" onclick="switchSettingsTab('notifications', this)">Notifications</button>
+                            <button class="settings-tab-btn px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors" onclick="switchSettingsTab('security', this)">Security</button>
+                            <button class="settings-tab-btn px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors" onclick="switchSettingsTab('preferences', this)">Preferences</button>
+                        </div>
+
+                        <!-- Settings Content: Profile -->
+                        <div id="settingsTabProfile" class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900">Profile Information</h3>
+                                <p class="text-sm text-gray-500">Update your personal account details</p>
+                            </div>
+                            <div class="flex items-center gap-6">
+                                <img src="https://api.dicebear.com/7.x/identicon/svg?seed=Alex" class="w-16 h-16 rounded-full border border-gray-200 bg-gray-50" id="setProfileAvatar">
+                                <div>
+                                    <button class="px-3.5 py-1.5 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors" onclick="showToast('Avatar updated')">
+                                        Upload Photo
+                                    </button>
+                                    <p class="text-xs text-gray-500 mt-1">JPG, PNG or SVG. Max size 2MB.</p>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1.5">First Name</label>
+                                    <input type="text" id="setFirstName" value="Alex" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1.5">Last Name</label>
+                                    <input type="text" id="setLastName" value="Rivera" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-700 mb-1.5">Email Address</label>
+                                <input type="email" id="setEmail" value="alex@rediscloud.dev" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-700 mb-1.5">Bio</label>
+                                <textarea id="setBio" rows="3" class="w-full bg-white border border-gray-200 rounded-lg p-3 text-sm text-gray-800 focus:outline-none focus:border-purple-500">Lead Database Architect managing multi-tenant Redis clusters.</textarea>
+                            </div>
+                            <div class="flex justify-end">
+                                <button class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-semibold transition-colors shadow-sm" onclick="showToast('Profile changes saved successfully!')">
+                                    Save Changes
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Settings Content: Notifications -->
+                        <div id="settingsTabNotifications" class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6 hidden">
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900">Notification Preferences</h3>
+                                <p class="text-sm text-gray-500">Choose how you want to be alerted on Redis operations</p>
+                            </div>
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between py-2 border-b border-gray-100">
+                                    <div>
+                                        <div class="font-medium text-sm text-gray-900">Email Notifications</div>
+                                        <div class="text-xs text-gray-500">Receive alerts on database events and errors</div>
+                                    </div>
+                                    <input type="checkbox" checked class="w-4 h-4 text-purple-600 rounded">
+                                </div>
+                                <div class="flex items-center justify-between py-2 border-b border-gray-100">
+                                    <div>
+                                        <div class="font-medium text-sm text-gray-900">High Memory Usage Alerts</div>
+                                        <div class="text-xs text-gray-500">Warn when memory exceeds 80% quota</div>
+                                    </div>
+                                    <input type="checkbox" checked class="w-4 h-4 text-purple-600 rounded">
+                                </div>
+                                <div class="flex items-center justify-between py-2">
+                                    <div>
+                                        <div class="font-medium text-sm text-gray-900">Security Alerts</div>
+                                        <div class="text-xs text-gray-500">Notify on unauthorized REST API attempts</div>
+                                    </div>
+                                    <input type="checkbox" checked class="w-4 h-4 text-purple-600 rounded">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Settings Content: Security -->
+                        <div id="settingsTabSecurity" class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6 hidden">
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900">Security &amp; Authentication</h3>
+                                <p class="text-sm text-gray-500">Manage credentials and connected sessions</p>
+                            </div>
+                            <div class="space-y-4 max-w-md">
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1.5">Current Password</label>
+                                    <input type="password" placeholder="••••••••" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1.5">New Password</label>
+                                    <input type="password" placeholder="At least 8 characters" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500">
+                                </div>
+                                <button class="px-4 py-2 border border-gray-200 hover:bg-gray-50 rounded-md text-sm font-semibold text-gray-700 transition-colors" onclick="showToast('Password updated successfully!')">
+                                    Update Password
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Settings Content: Preferences -->
+                        <div id="settingsTabPreferences" class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6 hidden">
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900">Application Preferences</h3>
+                                <p class="text-sm text-gray-500">Customize your console experience</p>
+                            </div>
+                            <div class="space-y-4">
+                                <div class="max-w-xs">
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1.5">Theme</label>
+                                    <select class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 cursor-pointer">
+                                        <option value="light" selected>Light Mode (Default)</option>
+                                        <option value="dark">Dark Mode</option>
+                                        <option value="system">System Default</option>
+                                    </select>
+                                </div>
+                                <div class="pt-6 border-t border-red-100">
+                                    <h4 class="text-sm font-bold text-red-600 mb-1">Danger Zone</h4>
+                                    <p class="text-xs text-gray-600 mb-3">Permanently flush all keyspaces and reset database instances to factory state.</p>
+                                    <button class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-medium transition-colors" onclick="document.getElementById('flushDbBtn').click()">
+                                        Flush Entire Database
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
+                </div>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- SLIDE-IN RECORD INSPECTOR DRAWER -->
+    <!-- ============================================================== -->
+    <aside class="fixed top-0 right-0 h-full w-[460px] bg-white border-l border-gray-200 shadow-2xl z-50 transform translate-x-full transition-transform duration-300 flex flex-col" id="recordInspector">
+        <!-- Inspector Header -->
+        <div class="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/50">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-700" id="inspTypeBadge">STRING</span>
+                <h3 class="font-semibold text-gray-900 text-base truncate font-mono" id="inspKeyTitle">key:name</h3>
+            </div>
+            <button class="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors" id="closeInspectorBtn">
+                <iconify-icon icon="lucide:x" width="18"></iconify-icon>
+            </button>
+        </div>
+
+        <!-- Inspector Body -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-6">
+            <!-- Meta Stats Card -->
+            <div class="grid grid-cols-3 gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 text-center">
+                <div>
+                    <span class="text-[10px] uppercase font-bold text-gray-400">Type</span>
+                    <div class="text-xs font-semibold text-gray-900 mt-0.5" id="inspMetaType">String</div>
+                </div>
+                <div>
+                    <span class="text-[10px] uppercase font-bold text-gray-400">Size</span>
+                    <div class="text-xs font-semibold text-gray-900 mt-0.5" id="inspMetaSize">0 bytes</div>
+                </div>
+                <div>
+                    <span class="text-[10px] uppercase font-bold text-gray-400">TTL Expiry</span>
+                    <div class="text-xs font-semibold text-gray-900 mt-0.5" id="inspMetaTtl">Persistent</div>
                 </div>
             </div>
 
-            <!-- Bottom Dockable Web CLI Drawer -->
-            <div class="terminal-drawer collapsed" id="terminalDrawer">
-                <div class="terminal-drawer-header">
-                    <div class="td-left">
-                        <span class="td-dot online"></span>
-                        <iconify-icon icon="lucide:terminal" width="15" style="color: #38bdf8;"></iconify-icon>
-                        <span class="td-title">Redis Interactive Terminal (Port 6379)</span>
-                    </div>
-                    <div class="td-shortcuts">
-                        <button class="chip" onclick="execCliShortcut('PING')">PING</button>
-                        <button class="chip" onclick="execCliShortcut('KEYS *')">KEYS *</button>
-                        <button class="chip" onclick="execCliShortcut('DBSIZE')">DBSIZE</button>
-                        <button class="chip" onclick="execCliShortcut('INFO')">INFO</button>
-                        <button class="chip" onclick="clearCliTerminal()">Clear</button>
-                    </div>
-                    <div class="td-controls">
-                        <button class="drawer-btn" id="drawerExpandBtn" title="Toggle size">
-                            <iconify-icon icon="lucide:maximize-2" width="14"></iconify-icon>
-                        </button>
-                        <button class="drawer-btn" id="drawerCloseBtn" title="Close drawer">
-                            <iconify-icon icon="lucide:x" width="16"></iconify-icon>
-                        </button>
-                    </div>
+            <!-- Content Host -->
+            <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                    <label class="text-xs font-bold uppercase tracking-wider text-gray-500">Record Content</label>
+                    <div id="contentTools" class="flex items-center gap-2"></div>
                 </div>
-
-                <div class="terminal-drawer-body" id="drawerOutput">
-                    <div class="term-line welcome">
-                        ⚡ Connected to Redis Server (Java 25) on 127.0.0.1:6379. Enter commands below.
-                    </div>
+                <div id="inspectorContentHost" class="min-h-[160px]">
+                    <!-- Formatted editor -->
                 </div>
+            </div>
 
-                <form class="terminal-drawer-input-row" id="drawerForm">
-                    <span class="term-prompt">redis-cli&gt;</span>
-                    <input type="text" id="drawerInput" placeholder="Execute command (e.g. SET user:name 'Alice' EX 300)..." autocomplete="off" spellcheck="false">
-                    <button type="submit" class="btn btn-primary btn-sm">
-                        <iconify-icon icon="lucide:corner-down-left" width="13"></iconify-icon>
-                        Execute
+            <!-- TTL Configuration -->
+            <div class="space-y-2 pt-2 border-t border-gray-100">
+                <label class="text-xs font-bold uppercase tracking-wider text-gray-500">Update Expiration (TTL)</label>
+                <div class="flex items-center gap-2">
+                    <input type="number" id="inspTtlSeconds" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-purple-500" placeholder="Seconds (0 = persistent)">
+                    <button class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg shrink-0 transition-colors" id="inspSetTtlBtn">
+                        Set TTL
                     </button>
-                </form>
+                    <button class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg shrink-0 transition-colors" id="inspPersistBtn">
+                        Persist
+                    </button>
+                </div>
             </div>
         </div>
 
-        <!-- Right Side Record Inspector & Editor Drawer -->
-        <aside class="record-inspector" id="recordInspector">
-            <div class="inspector-header">
-                <div class="inspector-title-group">
-                    <span class="badge-type" id="inspTypeBadge">STRING</span>
-                    <h3 class="inspector-key-title" id="inspKeyTitle">key:name</h3>
-                </div>
-                <button class="close-inspector-btn" id="closeInspectorBtn">
-                    <iconify-icon icon="lucide:x" width="18"></iconify-icon>
+        <!-- Inspector Footer -->
+        <div class="p-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
+            <button class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors" id="inspDeleteRecordBtn">
+                <iconify-icon icon="lucide:trash-2" width="14"></iconify-icon>
+                Delete Key
+            </button>
+            <div class="flex items-center gap-2">
+                <button class="px-3 py-1.5 border border-gray-200 text-gray-700 hover:bg-white text-xs font-medium rounded-lg transition-colors" id="inspCancelBtn">Close</button>
+                <button class="px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors shadow-sm" id="inspSaveRecordBtn">
+                    <iconify-icon icon="lucide:check" width="14"></iconify-icon>
+                    Save Changes
                 </button>
             </div>
+        </div>
+    </aside>
 
-            <div class="inspector-body">
-                <div class="inspector-meta-card">
-                    <div class="meta-field">
-                        <span class="lbl">
-                            <iconify-icon icon="lucide:database" width="11"></iconify-icon>
-                            Storage Type
-                        </span>
-                        <span class="val" id="inspMetaType">String</span>
-                    </div>
-                    <div class="meta-field">
-                        <span class="lbl">
-                            <iconify-icon icon="lucide:hard-drive" width="11"></iconify-icon>
-                            Memory Size
-                        </span>
-                        <span class="val" id="inspMetaSize">0 bytes</span>
-                    </div>
-                    <div class="meta-field">
-                        <span class="lbl">
-                            <iconify-icon icon="lucide:clock-9" width="11"></iconify-icon>
-                            TTL Expiry
-                        </span>
-                        <span class="val" id="inspMetaTtl">No Expiration (-1)</span>
-                    </div>
-                </div>
-
-                <!-- Value Editor Container -->
-                <div class="inspector-section">
-                    <div class="section-title-row">
-                        <label class="section-lbl">DATA CONTENT</label>
-                        <div class="content-tools" id="contentTools">
-                            <!-- e.g. Format JSON, Add Field -->
-                        </div>
-                    </div>
-                    <div id="inspectorContentHost" class="content-host">
-                        <!-- Populated based on type -->
-                    </div>
-                </div>
-
-                <!-- TTL Configuration -->
-                <div class="inspector-section">
-                    <label class="section-lbl">UPDATE EXPIRATION (TTL)</label>
-                    <div class="ttl-input-group">
-                        <input type="number" id="inspTtlSeconds" class="studio-input" placeholder="Seconds (0 or blank = persistent)">
-                        <button class="btn btn-secondary btn-sm" id="inspSetTtlBtn">
-                            <iconify-icon icon="lucide:clock" width="13"></iconify-icon>
-                            Set TTL
-                        </button>
-                        <button class="btn btn-secondary btn-sm" id="inspPersistBtn">
-                            <iconify-icon icon="lucide:infinity" width="13"></iconify-icon>
-                            Persist
-                        </button>
-                    </div>
-                </div>
+    <!-- ============================================================== -->
+    <!-- BOTTOM DOCKABLE WEB CLI DRAWER -->
+    <!-- ============================================================== -->
+    <div class="terminal-drawer fixed bottom-0 left-0 right-0 bg-gray-950 text-gray-100 border-t border-gray-800 z-40 transition-all duration-300 transform translate-y-full shadow-2xl flex flex-col h-[280px]" id="terminalDrawer">
+        <div class="px-4 py-2.5 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
+            <div class="flex items-center gap-2 text-xs font-semibold text-gray-300">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <iconify-icon icon="lucide:terminal" width="14" class="text-blue-400"></iconify-icon>
+                <span>Redis Interactive Terminal (Port 6379)</span>
             </div>
-
-            <div class="inspector-footer">
-                <button class="btn btn-outline-danger btn-sm" id="inspDeleteRecordBtn">
-                    <iconify-icon icon="lucide:trash-2" width="13"></iconify-icon>
-                    Delete Key
+            <div class="flex items-center gap-2">
+                <button class="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-[11px] rounded text-gray-300 font-mono" onclick="execCliShortcut('PING')">PING</button>
+                <button class="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-[11px] rounded text-gray-300 font-mono" onclick="execCliShortcut('KEYS *')">KEYS *</button>
+                <button class="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-[11px] rounded text-gray-300 font-mono" onclick="execCliShortcut('DBSIZE')">DBSIZE</button>
+                <button class="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-[11px] rounded text-gray-300 font-mono" onclick="execCliShortcut('INFO')">INFO</button>
+                <button class="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-[11px] rounded text-gray-300 font-mono" onclick="clearCliTerminal()">Clear</button>
+                <button class="p-1 text-gray-400 hover:text-white rounded" id="drawerExpandBtn" title="Toggle size">
+                    <iconify-icon icon="lucide:maximize-2" width="13"></iconify-icon>
                 </button>
-                <div class="footer-actions">
-                    <button class="btn btn-secondary btn-sm" id="inspCancelBtn">Close</button>
-                    <button class="btn btn-primary btn-sm" id="inspSaveRecordBtn">
-                        <iconify-icon icon="lucide:check" width="14"></iconify-icon>
-                        Save Changes
-                    </button>
-                </div>
+                <button class="p-1 text-gray-400 hover:text-white rounded" id="drawerCloseBtn" title="Close drawer">
+                    <iconify-icon icon="lucide:x" width="15"></iconify-icon>
+                </button>
             </div>
-        </aside>
+        </div>
+
+        <div class="flex-1 p-4 font-mono text-xs overflow-y-auto space-y-1" id="drawerOutput">
+            <div class="text-purple-400">⚡ Connected to Redis Server (Java 25) on 127.0.0.1:6379. Enter commands below.</div>
+        </div>
+
+        <form class="p-2.5 bg-gray-900 border-t border-gray-800 flex items-center gap-2" id="drawerForm">
+            <span class="text-xs font-mono text-purple-400 font-bold">redis-cli&gt;</span>
+            <input type="text" id="drawerInput" placeholder="Execute command (e.g. SET user:name 'Alice' EX 300)..." autocomplete="off" spellcheck="false" class="flex-1 bg-transparent border-none text-xs font-mono text-gray-100 focus:outline-none placeholder-gray-600">
+            <button type="submit" class="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-xs font-medium flex items-center gap-1">
+                <iconify-icon icon="lucide:corner-down-left" width="13"></iconify-icon>
+                <span>Execute</span>
+            </button>
+        </form>
     </div>
 
+    <!-- ============================================================== -->
+    <!-- MODALS -->
+    <!-- ============================================================== -->
+
     <!-- Insert Record Modal -->
-    <div class="modal-backdrop" id="insertModal">
-        <div class="modal-dialog">
-            <div class="modal-header">
-                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                    <iconify-icon icon="lucide:plus-circle" width="18" style="color: var(--brand-red);"></iconify-icon>
-                    <h3 class="modal-title">Insert New Redis Record</h3>
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" id="insertModal">
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+                        <iconify-icon icon="lucide:plus-circle" width="18"></iconify-icon>
+                    </div>
+                    <h3 class="font-semibold text-gray-900 text-base">Insert New Redis Record</h3>
                 </div>
-                <button class="modal-close" onclick="closeInsertModal()">
+                <button onclick="closeInsertModal()" class="text-gray-400 hover:text-gray-600">
                     <iconify-icon icon="lucide:x" width="18"></iconify-icon>
                 </button>
             </div>
-            <div class="modal-body">
-                <div class="studio-form-group">
-                    <label>Key Identifier *</label>
-                    <input type="text" id="insKey" class="studio-input" placeholder="e.g. user:1001:profile or session:abc">
-                    <small class="hint">Use colons (:) to create hierarchical namespaces automatically.</small>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Key Identifier *</label>
+                    <input type="text" id="insKey" placeholder="e.g. user:1001:profile or session:abc" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 font-mono">
+                    <span class="text-[11px] text-gray-400 mt-1 block">Use colons (:) to create hierarchical namespaces automatically.</span>
                 </div>
-
-                <div class="studio-form-group">
-                    <label>Data Type</label>
-                    <select id="insType" class="studio-input">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Data Type</label>
+                    <select id="insType" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 cursor-pointer">
                         <option value="string">String (Text, Numbers, or JSON)</option>
                         <option value="hash">Hash (Dictionary / Key-Value object)</option>
                         <option value="list">List (Ordered array / queue)</option>
                         <option value="set">Set (Collection of unique elements)</option>
                     </select>
                 </div>
-
-                <div class="studio-form-group" id="insValueGroup">
-                    <label id="insValueLabel">Value Content *</label>
-                    <textarea id="insValue" class="studio-input textarea" rows="4" placeholder="Enter string or JSON..."></textarea>
-                    <small class="hint" id="insValueHint">Raw text or JSON payload</small>
+                <div id="insValueGroup">
+                    <label class="block text-xs font-semibold text-gray-700 mb-1" id="insValueLabel">Value Content *</label>
+                    <textarea id="insValue" rows="4" placeholder="Enter string or JSON..." class="w-full bg-white border border-gray-200 rounded-lg p-3 text-xs font-mono text-gray-800 focus:outline-none focus:border-purple-500"></textarea>
+                    <span class="text-[11px] text-gray-400 mt-1 block" id="insValueHint">Raw text or JSON payload</span>
                 </div>
-
-                <div class="studio-form-group">
-                    <label>Expiration / TTL (Seconds, Optional)</label>
-                    <input type="number" id="insTtl" class="studio-input" placeholder="e.g. 3600 (Leave empty for persistent key)">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Expiration / TTL (Seconds, Optional)</label>
+                    <input type="number" id="insTtl" placeholder="e.g. 3600 (Leave empty for persistent key)" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500">
                 </div>
             </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeInsertModal()">Cancel</button>
-                <button class="btn btn-primary" id="insSubmitBtn">
-                    <iconify-icon icon="lucide:check" width="14"></iconify-icon>
+            <div class="p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-2">
+                <button onclick="closeInsertModal()" class="px-4 py-2 border border-gray-200 text-gray-700 hover:bg-white text-sm font-medium rounded-lg transition-colors">Cancel</button>
+                <button id="insSubmitBtn" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg flex items-center gap-1.5 transition-colors shadow-sm">
+                    <iconify-icon icon="lucide:check" width="16"></iconify-icon>
                     Save Record
                 </button>
             </div>
         </div>
     </div>
 
-    <!-- Connect to Redis Modal -->
-    <div class="modal-backdrop" id="connectModal">
-        <div class="modal-dialog connect-modal-dialog">
-            <div class="modal-header">
-                <div style="display: flex; align-items: center; gap: 0.65rem;">
-                    <div class="connect-icon-box">
-                        <iconify-icon icon="lucide:link-2" width="20" style="color: #38bdf8;"></iconify-icon>
+    <!-- Connect Modal -->
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" id="connectModal">
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <iconify-icon icon="lucide:link-2" width="20"></iconify-icon>
                     </div>
                     <div>
-                        <h3 class="modal-title">Connect to Redis</h3>
-                        <p class="modal-sub">Prisma, ORM, ioredis, Python &amp; Serverless connection hash URLs</p>
+                        <h3 class="font-semibold text-gray-900 text-base">Connect to Redis</h3>
+                        <p class="text-xs text-gray-500">Prisma, ioredis, Python, CLI &amp; Edge REST connection URLs</p>
                     </div>
                 </div>
-                <button class="modal-close" id="closeConnectModalBtn">
+                <button id="closeConnectModalBtn" class="text-gray-400 hover:text-gray-600">
                     <iconify-icon icon="lucide:x" width="18"></iconify-icon>
                 </button>
             </div>
-            <div class="modal-body">
-                <div class="connect-account-picker">
-                    <label class="lbl-small">Active Tenant / Virtual Database Profile:</label>
-                    <div class="account-select-wrap">
-                        <iconify-icon icon="lucide:user" width="15" class="picker-icon"></iconify-icon>
-                        <select id="connectAccountSelect" class="studio-select" style="width: 100%;">
-                            <!-- Populated with tenant options -->
-                        </select>
-                    </div>
+            <div class="p-6 space-y-5">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-1.5">Active Tenant / Virtual Database Profile:</label>
+                    <select id="connectAccountSelect" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 cursor-pointer shadow-sm">
+                        <!-- Populated dynamically -->
+                    </select>
                 </div>
 
-                <!-- Hash URLs Quick Copy Card -->
-                <div class="connect-url-card">
-                    <div class="url-row">
-                        <div class="url-lbl-row">
-                            <span class="url-lbl">Standard Redis URL (User &amp; Pass):</span>
-                            <span class="url-sub">For Prisma, ioredis, Django, Spring Boot</span>
+                <!-- URL Cards -->
+                <div class="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-xs font-semibold text-gray-700">Standard Redis URL (User &amp; Pass):</span>
+                            <span class="text-[11px] text-gray-500">For Prisma, ioredis, Django, Spring Boot</span>
                         </div>
-                        <div class="url-input-wrap">
-                            <input type="text" id="connRedisUrlInput" readonly class="studio-input font-mono">
-                            <button class="btn btn-secondary btn-sm" id="copyConnRedisUrlBtn" title="Copy URL">
-                                <iconify-icon icon="lucide:copy" width="14"></iconify-icon>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="connRedisUrlInput" readonly class="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-mono text-gray-800 focus:outline-none">
+                            <button id="copyConnRedisUrlBtn" class="px-3 py-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg flex items-center gap-1 shadow-sm transition-colors">
+                                <iconify-icon icon="lucide:copy" width="12"></iconify-icon>
                                 Copy
                             </button>
                         </div>
                     </div>
-                    <div class="url-row">
-                        <div class="url-lbl-row">
-                            <span class="url-lbl">Token-Only URL (Hash Token):</span>
-                            <span class="url-sub">Single-credential auth (Upstash &amp; Serverless style)</span>
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-xs font-semibold text-gray-700">Token-Only URL (Hash Token):</span>
+                            <span class="text-[11px] text-gray-500">Single-credential auth (Upstash &amp; Serverless style)</span>
                         </div>
-                        <div class="url-input-wrap">
-                            <input type="text" id="connTokenUrlInput" readonly class="studio-input font-mono">
-                            <button class="btn btn-secondary btn-sm" id="copyConnTokenUrlBtn" title="Copy Token URL">
-                                <iconify-icon icon="lucide:copy" width="14"></iconify-icon>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="connTokenUrlInput" readonly class="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-mono text-gray-800 focus:outline-none">
+                            <button id="copyConnTokenUrlBtn" class="px-3 py-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg flex items-center gap-1 shadow-sm transition-colors">
+                                <iconify-icon icon="lucide:copy" width="12"></iconify-icon>
                                 Copy
                             </button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Integration Framework Tabs -->
-                <div class="connect-tabs-header">
-                    <button class="connect-tab active" data-tab="prisma">
-                        <iconify-icon icon="logos:prisma" width="14"></iconify-icon>
-                        Prisma ORM
-                    </button>
-                    <button class="connect-tab" data-tab="ioredis">
-                        <iconify-icon icon="logos:nodejs-icon" width="14"></iconify-icon>
-                        ioredis (Node)
-                    </button>
-                    <button class="connect-tab" data-tab="python">
-                        <iconify-icon icon="logos:python" width="14"></iconify-icon>
-                        Python (redis-py)
-                    </button>
-                    <button class="connect-tab" data-tab="cli">
-                        <iconify-icon icon="lucide:terminal" width="14" style="color: #38bdf8;"></iconify-icon>
-                        Redis CLI
-                    </button>
-                    <button class="connect-tab" data-tab="rest">
-                        <iconify-icon icon="lucide:cloud" width="14" style="color: #34d399;"></iconify-icon>
-                        REST API (Edge)
-                    </button>
-                </div>
-
-                <div class="connect-tab-content">
-                    <div class="snippet-header">
-                        <span class="snippet-title" id="snippetLanguageTitle">schema.prisma &amp; .env</span>
-                        <button class="btn btn-secondary btn-sm" id="copySnippetBtn">
-                            <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
-                            Copy Code Snippet
+                <!-- Framework Snippet Tabs -->
+                <div>
+                    <div class="flex items-center gap-1 border-b border-gray-200 pb-2 text-xs font-medium">
+                        <button class="connect-tab px-3 py-1.5 rounded-lg bg-purple-50 text-purple-700 font-semibold flex items-center gap-1.5" data-tab="prisma">
+                            <iconify-icon icon="logos:prisma" width="13"></iconify-icon>
+                            Prisma ORM
+                        </button>
+                        <button class="connect-tab px-3 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100 flex items-center gap-1.5" data-tab="ioredis">
+                            <iconify-icon icon="logos:nodejs-icon" width="13"></iconify-icon>
+                            ioredis (Node)
+                        </button>
+                        <button class="connect-tab px-3 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100 flex items-center gap-1.5" data-tab="python">
+                            <iconify-icon icon="logos:python" width="13"></iconify-icon>
+                            Python
+                        </button>
+                        <button class="connect-tab px-3 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100 flex items-center gap-1.5" data-tab="cli">
+                            <iconify-icon icon="lucide:terminal" width="13" class="text-blue-500"></iconify-icon>
+                            Redis CLI
+                        </button>
+                        <button class="connect-tab px-3 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100 flex items-center gap-1.5" data-tab="rest">
+                            <iconify-icon icon="lucide:cloud" width="13" class="text-emerald-500"></iconify-icon>
+                            REST API
                         </button>
                     </div>
-                    <pre class="snippet-code-box"><code id="connectSnippetCode">// Loading snippet...</code></pre>
+                    <div class="mt-3 bg-gray-900 rounded-xl p-4 text-xs font-mono text-gray-100 shadow-inner relative">
+                        <div class="flex items-center justify-between mb-2 pb-2 border-b border-gray-800 text-[11px] text-gray-400">
+                            <span id="snippetLanguageTitle">schema.prisma &amp; .env</span>
+                            <button id="copySnippetBtn" class="text-purple-400 hover:text-purple-300 flex items-center gap-1 font-sans text-xs">
+                                <iconify-icon icon="lucide:copy" width="12"></iconify-icon>
+                                Copy Snippet
+                            </button>
+                        </div>
+                        <pre class="overflow-x-auto"><code id="connectSnippetCode">// Loading snippet...</code></pre>
+                    </div>
                 </div>
             </div>
-            <div class="modal-footer" style="justify-content: space-between;">
-                <div class="wire-status-pill">
-                    <span class="pulse-dot"></span>
+            <div class="p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                <div class="flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                     <span>Standard Redis RESP Wire Protocol Compatible</span>
                 </div>
-                <button class="btn btn-secondary" id="closeConnectModalBtn2">Close</button>
+                <button id="closeConnectModalBtn2" class="px-4 py-2 border border-gray-200 text-gray-700 hover:bg-white text-sm font-medium rounded-lg transition-colors">Close</button>
             </div>
         </div>
     </div>
 
-    <!-- User Authentication Modal (Google / Email / Demo Switcher) -->
-    <div class="modal-backdrop" id="authModal">
-        <div class="modal-dialog auth-modal-dialog">
-            <div class="auth-header">
-                <div class="auth-logo-row">
-                    <div class="logo-box">
-                        <iconify-icon icon="logos:redis" width="22" height="22"></iconify-icon>
-                    </div>
-                    <span class="auth-brand-name">Redis<span class="red-text">Studio</span> <span class="badge-type" style="background:#2563eb; color:#fff; font-size: 0.65rem;">Cloud</span></span>
+    <!-- Auth Modal -->
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" id="authModal">
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div class="p-6 text-center border-b border-gray-100 space-y-2">
+                <div class="w-12 h-12 bg-gradient-to-br from-purple-600 to-blue-600 rounded-xl flex items-center justify-center text-white mx-auto shadow-md">
+                    <iconify-icon icon="logos:redis" width="24"></iconify-icon>
                 </div>
-                <h3 class="auth-title">Welcome to Redis Cloud</h3>
-                <p class="auth-sub">Sign in to create databases, collaborate with team members, and get Prisma &amp; ORM connection strings.</p>
+                <h3 class="text-xl font-bold text-gray-900 tracking-tight">Welcome to Redis Cloud</h3>
+                <p class="text-xs text-gray-500">Sign in to deploy databases, collaborate with team members, and get Prisma connection URLs.</p>
             </div>
-
-            <div class="auth-body">
-                <!-- Google Sign In Button -->
-                <button type="button" class="btn-google-sign-in" id="googleSignInBtn">
-                    <iconify-icon icon="logos:google-icon" width="20"></iconify-icon>
+            <div class="p-6 space-y-4">
+                <button type="button" class="w-full py-2.5 px-4 bg-white border border-gray-200 hover:bg-gray-50 text-gray-800 text-sm font-semibold rounded-lg flex items-center justify-center gap-3 transition-colors shadow-sm" id="googleSignInBtn">
+                    <iconify-icon icon="logos:google-icon" width="18"></iconify-icon>
                     <span>Continue with Google</span>
                 </button>
 
-                <div class="auth-divider">
-                    <span>or continue with email</span>
+                <div class="relative flex items-center justify-center my-3">
+                    <div class="border-t border-gray-200 w-full"></div>
+                    <span class="bg-white px-3 text-[11px] font-medium text-gray-400 uppercase tracking-wider absolute">or continue with email</span>
                 </div>
 
-                <!-- Tabs: Sign In / Create Account -->
-                <div class="auth-tabs">
-                    <button class="auth-tab-btn active" id="authTabLogin" data-authtab="login">Sign In</button>
-                    <button class="auth-tab-btn" id="authTabRegister" data-authtab="register">Create Account</button>
+                <!-- Tabs: Login vs Register -->
+                <div class="flex bg-gray-100 p-1 rounded-lg text-xs font-semibold">
+                    <button class="flex-1 py-1.5 rounded-md bg-white text-gray-900 shadow-sm transition-all" id="authTabLogin" data-authtab="login">Sign In</button>
+                    <button class="flex-1 py-1.5 rounded-md text-gray-500 hover:text-gray-900 transition-all" id="authTabRegister" data-authtab="register">Create Account</button>
                 </div>
 
                 <!-- Login Form -->
-                <form id="authLoginForm" class="auth-form">
-                    <div class="studio-form-group">
-                        <label>Email Address</label>
-                        <input type="email" id="loginEmailInput" class="studio-input" placeholder="alex@rediscloud.dev" required autocomplete="email">
+                <form id="authLoginForm" class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Email Address</label>
+                        <input type="email" id="loginEmailInput" value="alex@rediscloud.dev" required class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm">
                     </div>
-                    <div class="studio-form-group">
-                        <label>Password</label>
-                        <input type="password" id="loginPasswordInput" class="studio-input" placeholder="••••••••" required autocomplete="current-password">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Password</label>
+                        <input type="password" id="loginPasswordInput" value="password123" required class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm">
                     </div>
-                    <button type="submit" class="btn btn-primary" id="loginSubmitBtn" style="width: 100%; justify-content: center; margin-top: 0.5rem;">
+                    <button type="submit" id="loginSubmitBtn" class="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors shadow-sm mt-2">
                         <iconify-icon icon="lucide:log-in" width="16"></iconify-icon>
                         Sign In to Cloud Studio
                     </button>
                 </form>
 
                 <!-- Register Form -->
-                <form id="authRegisterForm" class="auth-form" style="display: none;">
-                    <div class="studio-form-group">
-                        <label>Full Name</label>
-                        <input type="text" id="regNameInput" class="studio-input" placeholder="Alex Rivera" required autocomplete="name">
+                <form id="authRegisterForm" class="space-y-3 hidden">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Full Name</label>
+                        <input type="text" id="regNameInput" placeholder="Alex Rivera" required class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm">
                     </div>
-                    <div class="studio-form-group">
-                        <label>Work Email</label>
-                        <input type="email" id="regEmailInput" class="studio-input" placeholder="alex@rediscloud.dev" required autocomplete="email">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Work Email</label>
+                        <input type="email" id="regEmailInput" placeholder="alex@rediscloud.dev" required class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm">
                     </div>
-                    <div class="studio-form-group">
-                        <label>Password</label>
-                        <input type="password" id="regPasswordInput" class="studio-input" placeholder="At least 6 characters" required autocomplete="new-password">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Password</label>
+                        <input type="password" id="regPasswordInput" placeholder="At least 6 characters" required class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm">
                     </div>
-                    <button type="submit" class="btn btn-primary" id="regSubmitBtn" style="width: 100%; justify-content: center; margin-top: 0.5rem;">
+                    <button type="submit" id="regSubmitBtn" class="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors shadow-sm mt-2">
                         <iconify-icon icon="lucide:user-plus" width="16"></iconify-icon>
                         Create Free Account
                     </button>
                 </form>
 
-                <!-- Demo Account Switcher Card -->
-                <div class="demo-accounts-card">
-                    <div class="demo-card-head">
-                        <iconify-icon icon="lucide:sparkles" width="14" style="color: #fbbf24;"></iconify-icon>
-                        <span>1-Click Demo Profiles (Instant Test)</span>
+                <!-- 1-Click Demo Profiles -->
+                <div class="pt-3 border-t border-gray-100">
+                    <div class="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                        <iconify-icon icon="lucide:sparkles" class="text-amber-500" width="13"></iconify-icon>
+                        1-Click Demo Profiles (Instant Test)
                     </div>
-                    <div class="demo-buttons-grid">
-                        <button type="button" class="demo-user-btn" id="demoUserAlexBtn">
-                            <img src="https://api.dicebear.com/7.x/identicon/svg?seed=Alex" class="demo-avatar" alt="Alex">
-                            <div class="demo-info">
-                                <span class="name">Alex Rivera</span>
-                                <span class="role">Lead Dev (2 DBs)</span>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button type="button" class="p-2 border border-gray-200 hover:border-purple-300 hover:bg-purple-50/50 rounded-lg text-left flex items-center gap-2.5 transition-colors" id="demoUserAlexBtn">
+                            <img src="https://api.dicebear.com/7.x/identicon/svg?seed=Alex" class="w-8 h-8 rounded-full border border-gray-200">
+                            <div class="min-w-0">
+                                <div class="text-xs font-semibold text-gray-900 truncate">Alex Rivera</div>
+                                <div class="text-[10px] text-gray-500 truncate">Lead Dev (2 DBs)</div>
                             </div>
                         </button>
-                        <button type="button" class="demo-user-btn" id="demoUserSarahBtn">
-                            <img src="https://api.dicebear.com/7.x/identicon/svg?seed=Sarah" class="demo-avatar" alt="Sarah">
-                            <div class="demo-info">
-                                <span class="name">Sarah Chen</span>
-                                <span class="role">Product (1 DB, 1 Shared)</span>
+                        <button type="button" class="p-2 border border-gray-200 hover:border-purple-300 hover:bg-purple-50/50 rounded-lg text-left flex items-center gap-2.5 transition-colors" id="demoUserSarahBtn">
+                            <img src="https://api.dicebear.com/7.x/identicon/svg?seed=Sarah" class="w-8 h-8 rounded-full border border-gray-200">
+                            <div class="min-w-0">
+                                <div class="text-xs font-semibold text-gray-900 truncate">Sarah Chen</div>
+                                <div class="text-[10px] text-gray-500 truncate">Product (1 Shared)</div>
                             </div>
                         </button>
                     </div>
@@ -1018,44 +1709,41 @@
     </div>
 
     <!-- Create Database Modal -->
-    <div class="modal-backdrop" id="createDbModal">
-        <div class="modal-dialog">
-            <div class="modal-header">
-                <div style="display: flex; align-items: center; gap: 0.65rem;">
-                    <div class="connect-icon-box" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8;">
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" id="createDbModal">
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
                         <iconify-icon icon="lucide:database" width="20"></iconify-icon>
                     </div>
                     <div>
-                        <h3 class="modal-title">Create Redis Database</h3>
-                        <p class="modal-sub">Deploy a high-performance in-memory keyspace instance</p>
+                        <h3 class="font-semibold text-gray-900 text-base">Create Redis Database</h3>
+                        <p class="text-xs text-gray-500">Deploy a dedicated in-memory keyspace instance</p>
                     </div>
                 </div>
-                <button class="modal-close" id="closeCreateDbModalBtn">
+                <button id="closeCreateDbModalBtn" class="text-gray-400 hover:text-gray-600">
                     <iconify-icon icon="lucide:x" width="18"></iconify-icon>
                 </button>
             </div>
             <form id="createDatabaseForm">
-                <div class="modal-body">
-                    <div class="studio-form-group">
-                        <label>Database Name *</label>
-                        <input type="text" id="createDbNameInput" class="studio-input" placeholder="e.g. Production Cache or Session Store" required autocomplete="off">
-                        <small class="hint">Human-readable label for this database</small>
+                <div class="p-6 space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Database Name *</label>
+                        <input type="text" id="createDbNameInput" placeholder="e.g. Production Cache or Session Store" required class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm">
                     </div>
-                    <div class="studio-form-group">
-                        <label>Custom Database ID (Optional)</label>
-                        <input type="text" id="createDbIdInput" class="studio-input font-mono" placeholder="Leave blank to auto-generate (db_xxxxxxxx)">
-                        <small class="hint">Unique identifier used in connection URLs and CLI auth</small>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Custom Database ID (Optional)</label>
+                        <input type="text" id="createDbIdInput" placeholder="Leave blank to auto-generate (db_xxxxxxxx)" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm">
                     </div>
-                    <div class="studio-form-group">
-                        <label>Database Password (Optional)</label>
-                        <input type="text" id="createDbPassInput" class="studio-input font-mono" placeholder="Leave blank to generate secure secret">
-                        <small class="hint">Secret password for Redis wire connections</small>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Database Password (Optional)</label>
+                        <input type="text" id="createDbPassInput" placeholder="Leave blank to generate secure secret" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm">
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" id="cancelCreateDbBtn">Cancel</button>
-                    <button type="submit" class="btn btn-primary" id="submitCreateDbBtn">
-                        <iconify-icon icon="lucide:plus" width="14"></iconify-icon>
+                <div class="p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-2">
+                    <button type="button" id="cancelCreateDbBtn" class="px-4 py-2 border border-gray-200 text-gray-700 hover:bg-white text-sm font-medium rounded-lg transition-colors">Cancel</button>
+                    <button type="submit" id="submitCreateDbBtn" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg flex items-center gap-1.5 transition-colors shadow-sm">
+                        <iconify-icon icon="lucide:plus" width="16"></iconify-icon>
                         Create Database
                     </button>
                 </div>
@@ -1064,88 +1752,88 @@
     </div>
 
     <!-- Share Database Modal -->
-    <div class="modal-backdrop" id="shareDbModal">
-        <div class="modal-dialog share-modal-dialog">
-            <div class="modal-header">
-                <div style="display: flex; align-items: center; gap: 0.65rem;">
-                    <div class="connect-icon-box" style="background: rgba(167, 139, 250, 0.15); color: #a78bfa;">
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" id="shareDbModal">
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
                         <iconify-icon icon="lucide:share-2" width="20"></iconify-icon>
                     </div>
                     <div>
-                        <h3 class="modal-title">Share Database</h3>
-                        <p class="modal-sub" id="shareDbModalSubtitle">Manage collaborators and team permissions</p>
+                        <h3 class="font-semibold text-gray-900 text-base">Share Database</h3>
+                        <p class="text-xs text-gray-500" id="shareDbModalSubtitle">Manage collaborators and team permissions</p>
                     </div>
                 </div>
-                <button class="modal-close" id="closeShareDbModalBtn">
+                <button id="closeShareDbModalBtn" class="text-gray-400 hover:text-gray-600">
                     <iconify-icon icon="lucide:x" width="18"></iconify-icon>
                 </button>
             </div>
-            <div class="modal-body">
-                <!-- Invite by Email Section -->
-                <div class="share-invite-box">
-                    <label class="lbl-small">Invite Teammate by Email:</label>
-                    <form id="inviteCollaboratorForm" class="invite-form-row">
-                        <input type="email" id="shareTargetEmailInput" class="studio-input" placeholder="teammate@company.io" required>
-                        <select id="shareTargetRoleSelect" class="studio-select" style="min-width: 120px;">
+            <div class="p-6 space-y-5">
+                <!-- Invite by Email -->
+                <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-1.5">Invite Teammate by Email:</label>
+                    <form id="inviteCollaboratorForm" class="flex items-center gap-2">
+                        <input type="email" id="shareTargetEmailInput" placeholder="teammate@company.io" required class="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 shadow-sm">
+                        <select id="shareTargetRoleSelect" class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-500 cursor-pointer shadow-sm">
                             <option value="EDITOR">Editor (Read &amp; Write)</option>
                             <option value="VIEWER">Viewer (Read Only)</option>
                         </select>
-                        <button type="submit" class="btn btn-primary btn-sm" id="sendInviteBtn">
-                            <iconify-icon icon="lucide:user-plus" width="14"></iconify-icon>
+                        <button type="submit" id="sendInviteBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-3.5 py-2 rounded-lg text-sm font-semibold flex items-center gap-1 transition-colors shadow-sm shrink-0">
+                            <iconify-icon icon="lucide:user-plus" width="15"></iconify-icon>
                             Invite
                         </button>
                     </form>
                 </div>
 
-                <!-- Existing Collaborators List -->
-                <div class="share-section">
-                    <span class="lbl-small">People with Access:</span>
-                    <div class="collaborators-list" id="shareCollaboratorsList">
+                <!-- Collaborators List -->
+                <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-2">People with Access:</label>
+                    <div class="space-y-2 max-h-[160px] overflow-y-auto divide-y divide-gray-100" id="shareCollaboratorsList">
                         <!-- Populated dynamically -->
                     </div>
                 </div>
 
-                <!-- Shareable Invite Link Box -->
-                <div class="share-link-box">
-                    <div class="share-link-header">
-                        <div class="sl-title">
-                            <iconify-icon icon="lucide:link-2" width="15" style="color: #38bdf8;"></iconify-icon>
+                <!-- Shareable Invite Link -->
+                <div class="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2 text-xs font-semibold text-gray-800">
+                            <iconify-icon icon="lucide:link-2" class="text-blue-500" width="15"></iconify-icon>
                             <span>Shareable Invite Link</span>
                         </div>
-                        <div class="sl-toggle-group">
-                            <label class="switch-sm">
-                                <input type="checkbox" id="shareLinkEnableCheck">
-                                <span class="slider-sm"></span>
+                        <div class="flex items-center gap-2">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="shareLinkEnableCheck" class="sr-only peer">
+                                <div class="w-7 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-purple-600"></div>
                             </label>
-                            <span class="sl-toggle-label" id="shareLinkStatusLabel">Disabled</span>
+                            <span class="text-xs text-gray-500 font-medium" id="shareLinkStatusLabel">Disabled</span>
                         </div>
                     </div>
-                    <div class="sl-link-body" id="shareLinkBody" style="display: none;">
-                        <p class="sl-desc">Anyone with this link can join this database as:</p>
-                        <div class="sl-role-row">
-                            <select id="shareLinkRoleSelect" class="studio-select-sm">
+                    <div id="shareLinkBody" class="space-y-2 hidden">
+                        <div class="flex items-center justify-between text-xs text-gray-600">
+                            <span>Anyone with this link can join as:</span>
+                            <select id="shareLinkRoleSelect" class="bg-white border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-purple-500">
                                 <option value="VIEWER">Viewer (Read Only)</option>
                                 <option value="EDITOR">Editor (Read &amp; Write)</option>
                             </select>
                         </div>
-                        <div class="url-input-wrap" style="margin-top: 0.5rem;">
-                            <input type="text" id="shareLinkInput" readonly class="studio-input font-mono" style="font-size: 0.8rem;">
-                            <button class="btn btn-secondary btn-sm" id="copyShareLinkBtn">
-                                <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
-                                Copy Link
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="shareLinkInput" readonly class="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-mono text-gray-800 focus:outline-none">
+                            <button id="copyShareLinkBtn" class="px-3 py-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg flex items-center gap-1 shadow-sm transition-colors">
+                                <iconify-icon icon="lucide:copy" width="12"></iconify-icon>
+                                Copy
                             </button>
                         </div>
                     </div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" id="closeShareDbModalBtn2">Close</button>
+            <div class="p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-end">
+                <button id="closeShareDbModalBtn2" class="px-4 py-2 border border-gray-200 text-gray-700 hover:bg-white text-sm font-medium rounded-lg transition-colors">Close</button>
             </div>
         </div>
     </div>
 
-    <!-- Notification Toast Container -->
-    <div id="toastContainer" class="toast-shelf"></div>
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
     <script src="/js/app.js"></script>
 </body>

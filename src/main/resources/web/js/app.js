@@ -1,4 +1,8 @@
-// Redis Studio - Database Console Client Engine
+// ==============================================================
+// Redis Cloud - Enterprise SaaS Console Engine
+// ==============================================================
+
+// Datasheet & Pagination State
 let currentPage = 1;
 let pageSize = 50;
 let totalRecords = 0;
@@ -13,6 +17,7 @@ let pollTimer = null;
 let activeInspectKey = null;
 let inspectCache = null;
 
+// Virtual Database & User State
 let activeVirtualDb = 'default';
 let databasesCache = [];
 let tenantsCache = [];
@@ -27,6 +32,31 @@ let activeDbInstance = null;
 let activeDatabaseRole = 'OWNER';
 let activeDbTab = 'my';
 let activeShareDbId = null;
+
+// Charts References
+let overviewChartInstance = null;
+let analyticsTrendsChartInstance = null;
+let analyticsSuccessChartInstance = null;
+let analyticsDistributionChartInstance = null;
+let activeOverviewChartMetric = 'throughput';
+
+// Live Operations Stream Mock/Real Data
+let recentOperationsList = [
+    { id: 'RUN-6734', op: 'HSET', key: 'user:1001:profile', time: 'Just now', duration: '0.24ms', status: 'running' },
+    { id: 'RUN-6733', op: 'GET', key: 'session:auth:token', time: '12s ago', duration: '0.18ms', status: 'success' },
+    { id: 'RUN-6732', op: 'LPUSH', key: 'queue:events:incoming', time: '45s ago', duration: '0.31ms', status: 'success' },
+    { id: 'RUN-6731', op: 'PIPELINE', key: 'batch:metrics:sync', time: '2m ago', duration: '1.42ms', status: 'success' },
+    { id: 'RUN-6730', op: 'DEL', key: 'cache:temp:expired', time: '5m ago', duration: '0.15ms', status: 'success' },
+    { id: 'RUN-6729', op: 'HGETALL', key: 'config:flags:live', time: '8m ago', duration: '0.28ms', status: 'failed', error: 'Key not found' }
+];
+
+// Team Members Data
+let teamMembersList = [
+    { id: 1, name: 'Alex Rivera', email: 'alex@rediscloud.dev', role: 'Owner', status: 'online', avatar: 'https://api.dicebear.com/7.x/identicon/svg?seed=Alex', joinDate: 'Jan 2024', lastActive: 'Now', isOwner: true },
+    { id: 2, name: 'Sarah Chen', email: 'sarah@company.io', role: 'Engineer', status: 'online', avatar: 'https://api.dicebear.com/7.x/identicon/svg?seed=Sarah', joinDate: 'Mar 2024', lastActive: '5m ago', isOwner: false },
+    { id: 3, name: 'Michael Whitmore', email: 'michael@company.io', role: 'Engineer', status: 'away', avatar: 'https://api.dicebear.com/7.x/identicon/svg?seed=Michael', joinDate: 'Feb 2024', lastActive: '2h ago', isOwner: false },
+    { id: 4, name: 'Clara Blackwood', email: 'clara@company.io', role: 'Designer', status: 'offline', avatar: 'https://api.dicebear.com/7.x/identicon/svg?seed=Clara', joinDate: 'May 2024', lastActive: 'Yesterday', isOwner: false }
+];
 
 document.addEventListener('DOMContentLoaded', () => {
     initAuth();
@@ -44,10 +74,16 @@ document.addEventListener('DOMContentLoaded', () => {
     initBenchmarkEngine();
     initTenantsPanel();
     initConnectModal();
+    initOverviewDashboard();
+    initAnalyticsPage();
+    initTeamPage();
 
     fetchKeys();
     fetchStats();
     loadTenants();
+
+    // Check URL parameters (e.g. invite join link #join=lnk_...)
+    checkInviteHash();
 });
 
 // ==========================================
@@ -57,64 +93,138 @@ function initNavigation() {
     const navItems = document.querySelectorAll('.nav-item[data-view-pane]');
     navItems.forEach(item => {
         item.addEventListener('click', () => {
-            document.querySelectorAll('.sidebar .nav-item').forEach(i => i.classList.remove('active'));
-            item.classList.add('active');
-
             const targetPaneId = item.dataset.viewPane;
-            document.querySelectorAll('.studio-pane').forEach(p => p.style.display = 'none');
-            const targetPane = document.getElementById(targetPaneId);
-            if (targetPane) targetPane.style.display = 'flex';
+            navigateToPane(targetPaneId);
 
-            if (targetPaneId === 'pane-datasheet') {
-                if (item.dataset.typeFilter) {
-                    activeTypeFilter = item.dataset.typeFilter;
-                    activeNamespace = null;
-                    currentPage = 1;
-                    document.querySelectorAll('.tree-folder').forEach(f => f.classList.remove('active'));
-                }
+            if (targetPaneId === 'pane-datasheet' && item.dataset.typeFilter) {
+                activeTypeFilter = item.dataset.typeFilter;
+                activeNamespace = null;
+                currentPage = 1;
                 updateBreadcrumb();
                 fetchKeys();
-            } else if (targetPaneId === 'pane-databases' || targetPaneId === 'pane-tenants') {
-                updateBreadcrumb('Database Hub & Team Sharing');
-                loadUserDatabases();
-            } else if (targetPaneId === 'pane-cloud-api') {
-                updateBreadcrumb('Cloud REST API & RLS');
-                loadAclUsers();
-            } else if (targetPaneId === 'pane-benchmark') {
-                updateBreadcrumb('Stress Benchmark');
             }
         });
     });
 
-    document.getElementById('refreshNamespacesBtn').addEventListener('click', () => {
-        fetchKeys();
-        showToast('Refreshed namespaces');
+    // Global Search Bar in Header
+    const globalSearch = document.getElementById('globalSearchInput');
+    if (globalSearch) {
+        globalSearch.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const val = globalSearch.value.trim();
+                navigateToPane('pane-datasheet');
+                const filterInput = document.getElementById('filterSearchInput');
+                if (filterInput) {
+                    filterInput.value = val;
+                    currentSearch = val;
+                    currentPage = 1;
+                    fetchKeys();
+                }
+            }
+        });
+    }
+
+    // Sidebar search input
+    const sidebarSearch = document.getElementById('sidebarSearchInput');
+    if (sidebarSearch) {
+        sidebarSearch.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const val = sidebarSearch.value.trim();
+                navigateToPane('pane-datasheet');
+                const filterInput = document.getElementById('filterSearchInput');
+                if (filterInput) {
+                    filterInput.value = val;
+                    currentSearch = val;
+                    currentPage = 1;
+                    fetchKeys();
+                }
+            }
+        });
+    }
+
+    // Refresh Namespaces Button
+    const refreshNsBtn = document.getElementById('refreshNamespacesBtn');
+    if (refreshNsBtn) {
+        refreshNsBtn.addEventListener('click', () => {
+            fetchKeys();
+            showToast('Refreshed namespaces');
+        });
+    }
+
+    // Flush DB Button
+    const flushBtn = document.getElementById('flushDbBtn');
+    if (flushBtn) {
+        flushBtn.addEventListener('click', async () => {
+            const dbName = activeVirtualDb === 'default' ? 'db0' : activeVirtualDb;
+            if (!confirm(`⚠️ Are you sure you want to FLUSH database [${dbName}]? All records in this keyspace will be erased.`)) {
+                return;
+            }
+            try {
+                const endpoint = `/api/flush${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`;
+                const res = await fetch(endpoint, { method: 'POST' });
+                if (res.ok) {
+                    showToast(`Database [${dbName}] flushed`);
+                    selectedKeys.clear();
+                    updateBatchBar();
+                    currentPage = 1;
+                    fetchKeys();
+                    fetchStats();
+                }
+            } catch (e) {
+                showToast('Flush failed: ' + e.message, true);
+            }
+        });
+    }
+}
+
+function navigateToPane(targetPaneId) {
+    // Hide all panes
+    document.querySelectorAll('.studio-pane').forEach(p => p.style.display = 'none');
+
+    // Show target pane
+    const targetPane = document.getElementById(targetPaneId);
+    if (targetPane) {
+        targetPane.style.display = (targetPaneId === 'pane-overview' || targetPaneId === 'pane-team' || targetPaneId === 'pane-settings' || targetPaneId === 'pane-analytics') ? 'block' : 'flex';
+    }
+
+    // Update active nav styling
+    document.querySelectorAll('.nav-item').forEach(item => {
+        if (item.dataset.viewPane === targetPaneId && (!item.dataset.typeFilter || item.dataset.typeFilter === 'ALL')) {
+            item.className = 'nav-item flex items-center w-full justify-between px-3 py-2 rounded-md text-sm font-medium transition-colors bg-purple-50 text-purple-700 hover:bg-purple-100';
+        } else if (!item.dataset.typeFilter) {
+            item.className = 'nav-item flex items-center w-full justify-between px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors';
+        }
     });
 
-    document.getElementById('flushDbBtn').addEventListener('click', async () => {
-        const dbName = activeVirtualDb === 'default' ? 'db0' : activeVirtualDb;
-        if (!confirm(`⚠️ Are you sure you want to FLUSH database [${dbName}]? All records in this keyspace will be erased.`)) {
-            return;
-        }
-        try {
-            const endpoint = `/api/flush${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`;
-            const res = await fetch(endpoint, { method: 'POST' });
-            if (res.ok) {
-                showToast(`Database [${dbName}] flushed`);
-                selectedKeys.clear();
-                updateBatchBar();
-                currentPage = 1;
-                fetchKeys();
-                fetchStats();
-            }
-        } catch (e) {
-            showToast('Flush failed: ' + e.message, true);
-        }
-    });
+    // Update breadcrumb
+    if (targetPaneId === 'pane-overview') {
+        updateBreadcrumb('Overview');
+        renderOverviewChart(activeOverviewChartMetric);
+    } else if (targetPaneId === 'pane-datasheet') {
+        updateBreadcrumb();
+        fetchKeys();
+    } else if (targetPaneId === 'pane-databases') {
+        updateBreadcrumb('Databases Hub & Team');
+        loadUserDatabases();
+    } else if (targetPaneId === 'pane-analytics') {
+        updateBreadcrumb('Analytics');
+        renderAnalyticsCharts();
+    } else if (targetPaneId === 'pane-cloud-api') {
+        updateBreadcrumb('Cloud REST API & RLS');
+        loadAclUsers();
+    } else if (targetPaneId === 'pane-benchmark') {
+        updateBreadcrumb('Stress Benchmark');
+    } else if (targetPaneId === 'pane-team') {
+        updateBreadcrumb('Team');
+        renderTeamMembers();
+    } else if (targetPaneId === 'pane-settings') {
+        updateBreadcrumb('Settings');
+    }
 }
 
 function updateBreadcrumb(customTitle) {
     const crumb = document.getElementById('currentViewBreadcrumb');
+    if (!crumb) return;
     if (customTitle) {
         crumb.textContent = customTitle;
     } else if (activeNamespace) {
@@ -127,6 +237,489 @@ function updateBreadcrumb(customTitle) {
 }
 
 // ==========================================
+// Overview Dashboard (Matching app/page.tsx)
+// ==========================================
+function initOverviewDashboard() {
+    renderOverviewOperationsTable();
+    renderOverviewActivityStream();
+    renderOverviewTeamStatus();
+    renderOverviewChart(activeOverviewChartMetric);
+}
+
+function renderOverviewChart(metric = 'throughput') {
+    const ctx = document.getElementById('overviewChart');
+    if (!ctx) return;
+
+    if (overviewChartInstance) {
+        overviewChartInstance.destroy();
+    }
+
+    const labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'];
+    let dataset1 = [];
+    let dataset2 = [];
+    let label1 = 'Pipelined Ops';
+    let label2 = 'Direct Commands';
+
+    if (metric === 'throughput') {
+        dataset1 = [82000, 94000, 110000, 105000, 118000, 128450, 134000];
+        dataset2 = [45000, 52000, 61000, 58000, 64000, 71000, 76000];
+        label1 = 'Virtual Threads Ops/s';
+        label2 = 'REST API Hits';
+    } else if (metric === 'commands') {
+        dataset1 = [120000, 145000, 180000, 160000, 195000, 210000, 230000];
+        dataset2 = [60000, 75000, 85000, 80000, 92000, 105000, 112000];
+        label1 = 'Read Commands';
+        label2 = 'Write Commands';
+    } else if (metric === 'latency') {
+        dataset1 = [0.42, 0.38, 0.35, 0.31, 0.29, 0.28, 0.25];
+        dataset2 = [0.65, 0.60, 0.54, 0.49, 0.45, 0.42, 0.39];
+        label1 = 'P50 Latency (ms)';
+        label2 = 'P99 Latency (ms)';
+    }
+
+    const gradient1 = ctx.getContext('2d').createLinearGradient(0, 0, 0, 300);
+    gradient1.addColorStop(0, 'rgba(147, 51, 234, 0.25)');
+    gradient1.addColorStop(1, 'rgba(147, 51, 234, 0.0)');
+
+    const gradient2 = ctx.getContext('2d').createLinearGradient(0, 0, 0, 300);
+    gradient2.addColorStop(0, 'rgba(59, 130, 246, 0.2)');
+    gradient2.addColorStop(1, 'rgba(59, 130, 246, 0.0)');
+
+    overviewChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: label1,
+                    data: dataset1,
+                    borderColor: '#9333ea',
+                    backgroundColor: gradient1,
+                    fill: true,
+                    tension: 0.4,
+                    borderWidth: 2.5,
+                    pointBackgroundColor: '#9333ea',
+                    pointRadius: 3,
+                    pointHoverRadius: 6
+                },
+                {
+                    label: label2,
+                    data: dataset2,
+                    borderColor: '#3b82f6',
+                    backgroundColor: gradient2,
+                    fill: true,
+                    tension: 0.4,
+                    borderWidth: 2,
+                    pointBackgroundColor: '#3b82f6',
+                    pointRadius: 3,
+                    pointHoverRadius: 6
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: {
+                        boxWidth: 12,
+                        font: { family: '"Plus Jakarta Sans", sans-serif', size: 12 },
+                        color: '#4b5563'
+                    }
+                },
+                tooltip: {
+                    backgroundColor: '#ffffff',
+                    titleColor: '#111827',
+                    bodyColor: '#4b5563',
+                    borderColor: '#e5e7eb',
+                    borderWidth: 1,
+                    padding: 10,
+                    boxPadding: 4,
+                    usePointStyle: true,
+                    titleFont: { weight: 'bold' }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { color: '#f3f4f6' },
+                    ticks: { color: '#6b7280', font: { family: '"Plus Jakarta Sans", sans-serif', size: 11 } }
+                },
+                y: {
+                    grid: { color: '#f3f4f6' },
+                    ticks: { color: '#6b7280', font: { family: '"Plus Jakarta Sans", sans-serif', size: 11 } }
+                }
+            }
+        }
+    });
+}
+
+function switchOverviewChartTab(metric, btn) {
+    activeOverviewChartMetric = metric;
+    const parent = btn.parentElement;
+    parent.querySelectorAll('button').forEach(b => {
+        b.className = 'px-3 py-1 rounded-md text-gray-600 hover:text-gray-900';
+    });
+    btn.className = 'px-3 py-1 rounded-md bg-white text-gray-900 shadow-sm font-semibold';
+    renderOverviewChart(metric);
+}
+
+function renderOverviewOperationsTable() {
+    const tbody = document.getElementById('overviewOperationsTableBody');
+    if (!tbody) return;
+
+    tbody.innerHTML = recentOperationsList.map(item => `
+        <tr class="hover:bg-gray-50/80 transition-colors">
+            <td class="py-3 px-4 font-mono text-xs font-medium text-gray-500">${item.id}</td>
+            <td class="py-3 px-4 font-medium text-gray-900">${item.op}</td>
+            <td class="py-3 px-4 text-xs text-gray-500">${item.time}</td>
+            <td class="py-3 px-4 text-xs text-gray-500 font-mono">${item.duration}</td>
+            <td class="py-3 px-4">
+                ${item.status === 'running' ? `
+                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                        <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                        Running
+                    </span>
+                ` : item.status === 'success' ? `
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700">
+                        <iconify-icon icon="lucide:check-circle" width="12"></iconify-icon>
+                        Success
+                    </span>
+                ` : `
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700">
+                        <iconify-icon icon="lucide:x-circle" width="12"></iconify-icon>
+                        Failed
+                    </span>
+                `}
+            </td>
+            <td class="py-3 px-4 font-mono text-xs text-gray-600 truncate max-w-44">${item.key}</td>
+            <td class="py-3 px-4 text-right">
+                <button class="p-1 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100" onclick="inspectKey('${item.key}')" title="Inspect Key">
+                    <iconify-icon icon="lucide:more-horizontal" width="16"></iconify-icon>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function refreshRecentOperations() {
+    // Generate new mock operation
+    const ops = ['GET', 'SET', 'HSET', 'LPUSH', 'DEL', 'EXPIRE'];
+    const keys = ['user:session:xyz', 'analytics:visits', 'cache:products', 'lock:sync', 'cart:items:302'];
+    const newOp = {
+        id: 'RUN-' + (Math.floor(Math.random() * 900) + 6800),
+        op: ops[Math.floor(Math.random() * ops.length)],
+        key: keys[Math.floor(Math.random() * keys.length)],
+        time: 'Just now',
+        duration: (Math.random() * 0.4 + 0.1).toFixed(2) + 'ms',
+        status: Math.random() > 0.1 ? 'success' : 'running'
+    };
+    recentOperationsList.unshift(newOp);
+    if (recentOperationsList.length > 8) recentOperationsList.pop();
+    renderOverviewOperationsTable();
+    renderOverviewActivityStream();
+    showToast('Recent operations updated');
+}
+
+function renderOverviewActivityStream() {
+    const container = document.getElementById('ovRecentActivityStream');
+    if (!container) return;
+
+    container.innerHTML = recentOperationsList.slice(0, 5).map(item => `
+        <div class="flex items-center gap-3 p-3.5 hover:bg-gray-50/80 transition-colors">
+            <span class="w-2 h-2 rounded-full ${item.status === 'success' ? 'bg-emerald-500' : item.status === 'running' ? 'bg-blue-500 animate-pulse' : 'bg-red-500'} shrink-0"></span>
+            <div class="min-w-0 flex-1">
+                <div class="font-medium text-xs text-gray-900 truncate font-mono">${item.op} ${item.key}</div>
+                <div class="text-[11px] text-gray-500 mt-0.5">${item.time} • ${item.duration}</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderOverviewTeamStatus() {
+    const container = document.getElementById('ovTeamStatusList');
+    if (!container) return;
+
+    container.innerHTML = teamMembersList.map(member => `
+        <div class="flex items-center gap-3 p-3.5 hover:bg-gray-50/80 transition-colors">
+            <div class="relative shrink-0">
+                <img src="${member.avatar}" class="w-8 h-8 rounded-full border border-gray-200">
+                <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${member.status === 'online' ? 'bg-emerald-500' : member.status === 'away' ? 'bg-amber-500' : 'bg-gray-400'}"></span>
+            </div>
+            <div class="min-w-0 flex-1">
+                <div class="font-medium text-xs text-gray-900 truncate">${member.name}</div>
+                <div class="text-[11px] text-gray-500 mt-0.5">${member.role} • ${member.status === 'online' ? 'Available' : 'Away'}</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ==========================================
+// Analytics Page (Matching app/analytics/page.tsx)
+// ==========================================
+function initAnalyticsPage() {
+    // Analytics charts rendered when switching to pane
+}
+
+function renderAnalyticsCharts() {
+    renderAnalyticsExecTrends();
+    renderAnalyticsSuccessBreakdown();
+    renderAnalyticsDistribution();
+    renderAnalyticsTopNamespaces();
+}
+
+function renderAnalyticsExecTrends() {
+    const ctx = document.getElementById('analyticsExecTrendsChart');
+    if (!ctx) return;
+    if (analyticsTrendsChartInstance) analyticsTrendsChartInstance.destroy();
+
+    const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 250);
+    gradient.addColorStop(0, 'rgba(147, 51, 234, 0.25)');
+    gradient.addColorStop(1, 'rgba(147, 51, 234, 0.0)');
+
+    analyticsTrendsChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'],
+            datasets: [{
+                label: 'Executions',
+                data: [4000, 3000, 5000, 2780, 1890, 2390, 3490],
+                borderColor: '#9333ea',
+                backgroundColor: gradient,
+                fill: true,
+                tension: 0.4,
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } },
+                y: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } }
+            }
+        }
+    });
+}
+
+function renderAnalyticsSuccessBreakdown() {
+    const ctx = document.getElementById('analyticsSuccessChart');
+    if (!ctx) return;
+    if (analyticsSuccessChartInstance) analyticsSuccessChartInstance.destroy();
+
+    analyticsSuccessChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'],
+            datasets: [
+                {
+                    label: 'Success',
+                    data: [3800, 2850, 4900, 2650, 1820, 2300, 3400],
+                    backgroundColor: '#10b981',
+                    borderRadius: 4
+                },
+                {
+                    label: 'Failed',
+                    data: [200, 150, 100, 130, 70, 90, 90],
+                    backgroundColor: '#ef4444',
+                    borderRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { font: { size: 11 }, boxWidth: 10 }
+                }
+            },
+            scales: {
+                x: { stacked: true, grid: { color: '#f3f4f6' } },
+                y: { stacked: true, grid: { color: '#f3f4f6' } }
+            }
+        }
+    });
+}
+
+function renderAnalyticsDistribution() {
+    const ctx = document.getElementById('analyticsDistributionChart');
+    if (!ctx) return;
+    if (analyticsDistributionChartInstance) analyticsDistributionChartInstance.destroy();
+
+    analyticsDistributionChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['user:', 'session:', 'app:', 'cache:', 'queue:'],
+            datasets: [{
+                data: [35, 25, 20, 15, 5],
+                backgroundColor: ['#9333ea', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'right', labels: { boxWidth: 10, font: { size: 11 } } }
+            },
+            cutout: '70%'
+        }
+    });
+}
+
+function renderAnalyticsTopNamespaces() {
+    const list = document.getElementById('analyticsNamespacesList');
+    if (!list) return;
+
+    const data = [
+        { name: 'user:*', share: '35%', runs: '8,690', color: 'bg-purple-600' },
+        { name: 'session:*', share: '25%', runs: '6,210', color: 'bg-blue-600' },
+        { name: 'app:*', share: '20%', runs: '4,960', color: 'bg-emerald-600' },
+        { name: 'cache:*', share: '15%', runs: '3,720', color: 'bg-amber-600' },
+        { name: 'queue:*', share: '5%', runs: '1,240', color: 'bg-red-600' }
+    ];
+
+    list.innerHTML = data.map(item => `
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <span class="w-3 h-3 rounded-full ${item.color}"></span>
+                <span class="font-mono text-xs font-semibold text-gray-800">${item.name}</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs">
+                <span class="text-gray-500 font-medium">${item.share}</span>
+                <span class="bg-gray-100 text-gray-700 px-2 py-0.5 rounded font-mono">${item.runs} ops</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ==========================================
+// Team Page (Matching app/team/page.tsx)
+// ==========================================
+function initTeamPage() {
+    renderTeamMembers();
+}
+
+function renderTeamMembers() {
+    const container = document.getElementById('teamTabMembers');
+    if (!container) return;
+
+    container.innerHTML = teamMembersList.map(member => `
+        <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div class="flex items-center gap-4">
+                <div class="relative">
+                    <img src="${member.avatar}" class="w-12 h-12 rounded-full border border-gray-200">
+                    <span class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${member.status === 'online' ? 'bg-emerald-500' : member.status === 'away' ? 'bg-amber-500' : 'bg-gray-400'}"></span>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h4 class="font-semibold text-gray-900 text-sm">${member.name}</h4>
+                        ${member.isOwner ? `<iconify-icon icon="lucide:crown" class="text-purple-600" width="14"></iconify-icon>` : ''}
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${member.role === 'Owner' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">${member.role}</span>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 mt-1">
+                        <span>${member.email}</span>
+                        <span>•</span>
+                        <span>Joined ${member.joinDate}</span>
+                        <span>•</span>
+                        <span>Active: ${member.lastActive}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button class="px-3 py-1.5 border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-lg text-xs font-medium" onclick="showToast('Message sent to ' + '${member.name}')">Message</button>
+                ${!member.isOwner ? `
+                    <button class="px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-xs font-medium" onclick="showToast('Member removed')">Remove</button>
+                ` : ''}
+            </div>
+        </div>
+    `).join('');
+
+    // Tab Invitations
+    const invitesContainer = document.getElementById('teamTabInvitations');
+    if (invitesContainer) {
+        invitesContainer.innerHTML = `
+            <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center">
+                        <iconify-icon icon="lucide:mail" width="18"></iconify-icon>
+                    </div>
+                    <div>
+                        <div class="font-semibold text-sm text-gray-900">devops@partner.org</div>
+                        <div class="text-xs text-gray-500">Invited as Viewer • 2 days ago</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700">Pending</span>
+                    <button class="text-xs text-red-600 hover:underline px-2 py-1" onclick="showToast('Invitation cancelled')">Cancel</button>
+                </div>
+            </div>
+        `;
+    }
+
+    // Tab Roles
+    const rolesContainer = document.getElementById('teamTabRoles');
+    if (rolesContainer) {
+        rolesContainer.innerHTML = `
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-700">Owner</span>
+                        <span class="text-xs text-gray-400">1 member</span>
+                    </div>
+                    <p class="text-xs text-gray-600">Full administrative access across all databases, billing, user management, and API tokens.</p>
+                </div>
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700">Editor</span>
+                        <span class="text-xs text-gray-400">2 members</span>
+                    </div>
+                    <p class="text-xs text-gray-600">Read and write permissions to databases, ability to insert/edit/delete keys, and run benchmarks.</p>
+                </div>
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-100 text-gray-700">Viewer</span>
+                        <span class="text-xs text-gray-400">2 members</span>
+                    </div>
+                    <p class="text-xs text-gray-600">Read-only permissions to query records, view telemetry charts, and inspect keys.</p>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function switchTeamTab(tabName, btn) {
+    const parent = btn.parentElement;
+    parent.querySelectorAll('.team-tab-btn').forEach(b => {
+        b.className = 'team-tab-btn px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors';
+    });
+    btn.className = 'team-tab-btn px-4 py-2 rounded-lg text-sm font-semibold transition-colors bg-purple-50 text-purple-700';
+
+    document.getElementById('teamTabMembers').classList.toggle('hidden', tabName !== 'members');
+    document.getElementById('teamTabInvitations').classList.toggle('hidden', tabName !== 'invitations');
+    document.getElementById('teamTabRoles').classList.toggle('hidden', tabName !== 'roles');
+}
+
+// ==========================================
+// Settings Tabs
+// ==========================================
+function switchSettingsTab(tabName, btn) {
+    const parent = btn.parentElement;
+    parent.querySelectorAll('.settings-tab-btn').forEach(b => {
+        b.className = 'settings-tab-btn px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors';
+    });
+    btn.className = 'settings-tab-btn px-4 py-2 rounded-lg text-sm font-semibold transition-colors bg-purple-50 text-purple-700';
+
+    document.getElementById('settingsTabProfile').classList.toggle('hidden', tabName !== 'profile');
+    document.getElementById('settingsTabNotifications').classList.toggle('hidden', tabName !== 'notifications');
+    document.getElementById('settingsTabSecurity').classList.toggle('hidden', tabName !== 'security');
+    document.getElementById('settingsTabPreferences').classList.toggle('hidden', tabName !== 'preferences');
+}
+
+// ==========================================
 // Datasheet Filtering, Sorting & Toolbar
 // ==========================================
 function initDatasheetToolbar() {
@@ -135,272 +728,269 @@ function initDatasheetToolbar() {
     const selectAllCheck = document.getElementById('selectAllCheckbox');
 
     let debounce;
-    searchInput.addEventListener('input', () => {
-        clearTimeout(debounce);
-        debounce = setTimeout(() => {
-            currentSearch = searchInput.value.trim();
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            clearTimeout(debounce);
+            debounce = setTimeout(() => {
+                currentSearch = searchInput.value.trim();
+                currentPage = 1;
+                fetchKeys();
+            }, 250);
+        });
+    }
+
+    if (sortSelect) {
+        sortSelect.addEventListener('change', (e) => {
+            currentSort = e.target.value;
             currentPage = 1;
             fetchKeys();
-        }, 250);
-    });
+        });
+    }
 
-    sortSelect.addEventListener('change', (e) => {
-        currentSort = e.target.value;
-        currentPage = 1;
-        fetchKeys();
-    });
+    if (selectAllCheck) {
+        selectAllCheck.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                currentPageKeys.forEach(k => selectedKeys.add(k.key));
+            } else {
+                currentPageKeys.forEach(k => selectedKeys.delete(k.key));
+            }
+            renderTableRows();
+            updateBatchBar();
+        });
+    }
 
-    selectAllCheck.addEventListener('change', (e) => {
-        if (e.target.checked) {
-            currentPageKeys.forEach(k => selectedKeys.add(k.key));
-        } else {
-            selectedKeys.clear();
-        }
-        updateBatchBar();
-        renderTableRows();
-    });
+    const batchDelBtn = document.getElementById('batchDeleteBtn');
+    if (batchDelBtn) {
+        batchDelBtn.addEventListener('click', async () => {
+            if (selectedKeys.size === 0) return;
+            if (!confirm(`Delete ${selectedKeys.size} selected key(s)?`)) return;
 
-    document.getElementById('batchCancelBtn').addEventListener('click', () => {
-        selectedKeys.clear();
-        selectAllCheck.checked = false;
-        updateBatchBar();
-        renderTableRows();
-    });
-
-    document.getElementById('batchDeleteBtn').addEventListener('click', async () => {
-        const count = selectedKeys.size;
-        if (count === 0) return;
-        if (!confirm(`Are you sure you want to delete ${count} selected records?`)) return;
-
-        try {
-            const res = await fetch('/api/batch-delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ keys: Array.from(selectedKeys), db: activeVirtualDb })
-            });
-            const data = await res.json();
-            if (data.success) {
-                showToast(`Deleted ${data.deletedCount} records`);
+            try {
+                for (const key of selectedKeys) {
+                    await fetch(`/api/key?key=${encodeURIComponent(key)}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`, {
+                        method: 'DELETE'
+                    });
+                }
+                showToast(`Deleted ${selectedKeys.size} key(s)`);
                 selectedKeys.clear();
                 updateBatchBar();
                 fetchKeys();
                 fetchStats();
+            } catch (err) {
+                showToast('Failed to delete keys: ' + err.message, true);
             }
-        } catch (e) {
-            showToast('Batch delete failed: ' + e.message, true);
-        }
-    });
+        });
+    }
 
-    document.getElementById('manualRefreshBtn').addEventListener('click', () => {
-        fetchKeys();
-        fetchStats();
-        showToast('Database refreshed');
-    });
+    const batchCancelBtn = document.getElementById('batchCancelBtn');
+    if (batchCancelBtn) {
+        batchCancelBtn.addEventListener('click', () => {
+            selectedKeys.clear();
+            const chk = document.getElementById('selectAllCheckbox');
+            if (chk) chk.checked = false;
+            renderTableRows();
+            updateBatchBar();
+        });
+    }
 }
 
 function updateBatchBar() {
     const bar = document.getElementById('batchActionBar');
     const countText = document.getElementById('batchCountText');
-    const selectAllCheck = document.getElementById('selectAllCheckbox');
+    if (!bar || !countText) return;
 
     if (selectedKeys.size > 0) {
-        bar.classList.add('show');
-        countText.textContent = `${selectedKeys.size} record${selectedKeys.size > 1 ? 's' : ''} selected`;
+        bar.classList.remove('hidden');
+        bar.classList.add('flex');
+        countText.textContent = `${selectedKeys.size} selected`;
     } else {
-        bar.classList.remove('show');
-        if (selectAllCheck) selectAllCheck.checked = false;
+        bar.classList.add('hidden');
+        bar.classList.remove('flex');
     }
 }
 
 // ==========================================
-// Datasheet Pagination
+// Pagination Engine
 // ==========================================
 function initPagination() {
+    const pageSizeSelect = document.getElementById('pagPageSizeSelect');
     const firstBtn = document.getElementById('pagFirstBtn');
     const prevBtn = document.getElementById('pagPrevBtn');
     const nextBtn = document.getElementById('pagNextBtn');
     const lastBtn = document.getElementById('pagLastBtn');
     const jumpInput = document.getElementById('pagJumpInput');
-    const sizeSelect = document.getElementById('pagPageSizeSelect');
 
-    firstBtn.addEventListener('click', () => {
-        if (currentPage > 1) {
+    if (pageSizeSelect) {
+        pageSizeSelect.addEventListener('change', (e) => {
+            pageSize = parseInt(e.target.value, 10);
             currentPage = 1;
             fetchKeys();
-        }
-    });
+        });
+    }
 
-    prevBtn.addEventListener('click', () => {
-        if (currentPage > 1) {
-            currentPage--;
-            fetchKeys();
-        }
-    });
-
-    nextBtn.addEventListener('click', () => {
-        if (currentPage < totalPages) {
-            currentPage++;
-            fetchKeys();
-        }
-    });
-
-    lastBtn.addEventListener('click', () => {
-        if (currentPage < totalPages) {
-            currentPage = totalPages;
-            fetchKeys();
-        }
-    });
-
-    jumpInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            let p = parseInt(jumpInput.value, 10);
-            if (!isNaN(p) && p >= 1 && p <= totalPages && p !== currentPage) {
-                currentPage = p;
+    if (firstBtn) {
+        firstBtn.addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage = 1;
                 fetchKeys();
-            } else {
-                jumpInput.value = currentPage;
             }
-        }
-    });
+        });
+    }
 
-    jumpInput.addEventListener('blur', () => {
-        let p = parseInt(jumpInput.value, 10);
-        if (!isNaN(p) && p >= 1 && p <= totalPages && p !== currentPage) {
-            currentPage = p;
-            fetchKeys();
-        } else {
-            jumpInput.value = currentPage;
-        }
-    });
+    if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                fetchKeys();
+            }
+        });
+    }
 
-    sizeSelect.addEventListener('change', (e) => {
-        pageSize = parseInt(e.target.value, 10) || 50;
-        currentPage = 1;
-        fetchKeys();
-    });
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                currentPage++;
+                fetchKeys();
+            }
+        });
+    }
+
+    if (lastBtn) {
+        lastBtn.addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                currentPage = totalPages;
+                fetchKeys();
+            }
+        });
+    }
+
+    if (jumpInput) {
+        jumpInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                let target = parseInt(jumpInput.value, 10);
+                if (isNaN(target)) target = 1;
+                if (target < 1) target = 1;
+                if (target > totalPages) target = totalPages;
+                currentPage = target;
+                fetchKeys();
+            }
+        });
+    }
 }
 
 function updatePaginationBar() {
     const rangeInfo = document.getElementById('pagRangeInfo');
-    const curPageNum = document.getElementById('pagCurrentPageNum');
-    const totPageNum = document.getElementById('pagTotalPagesNum');
+    const currentNum = document.getElementById('pagCurrentPageNum');
+    const totalNum = document.getElementById('pagTotalPagesNum');
     const jumpInput = document.getElementById('pagJumpInput');
     const firstBtn = document.getElementById('pagFirstBtn');
     const prevBtn = document.getElementById('pagPrevBtn');
     const nextBtn = document.getElementById('pagNextBtn');
     const lastBtn = document.getElementById('pagLastBtn');
+    const counter = document.getElementById('recordCounter');
 
-    const start = totalRecords === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-    const end = Math.min(currentPage * pageSize, totalRecords);
-
-    if (rangeInfo) rangeInfo.textContent = `Showing ${start.toLocaleString()} – ${end.toLocaleString()} of ${totalRecords.toLocaleString()} records`;
-    if (curPageNum) curPageNum.textContent = currentPage.toLocaleString();
-    if (totPageNum) totPageNum.textContent = totalPages.toLocaleString();
-    if (jumpInput) {
-        jumpInput.value = currentPage;
-        jumpInput.max = totalPages;
+    if (totalRecords === 0) {
+        if (rangeInfo) rangeInfo.textContent = 'Showing 0 – 0 of 0 records';
+        if (currentNum) currentNum.textContent = '0';
+        if (totalNum) totalNum.textContent = '0';
+        if (jumpInput) jumpInput.value = 1;
+        if (firstBtn) firstBtn.disabled = true;
+        if (prevBtn) prevBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = true;
+        if (lastBtn) lastBtn.disabled = true;
+        if (counter) counter.textContent = '0 records';
+        return;
     }
 
-    if (firstBtn) firstBtn.disabled = (currentPage <= 1);
-    if (prevBtn) prevBtn.disabled = (currentPage <= 1);
-    if (nextBtn) nextBtn.disabled = (currentPage >= totalPages);
-    if (lastBtn) lastBtn.disabled = (currentPage >= totalPages);
+    const startIdx = (currentPage - 1) * pageSize + 1;
+    const endIdx = Math.min(currentPage * pageSize, totalRecords);
+
+    if (rangeInfo) rangeInfo.textContent = `Showing ${startIdx} – ${endIdx} of ${totalRecords.toLocaleString()} records`;
+    if (currentNum) currentNum.textContent = currentPage;
+    if (totalNum) totalNum.textContent = totalPages;
+    if (jumpInput) jumpInput.value = currentPage;
+
+    if (firstBtn) firstBtn.disabled = currentPage <= 1;
+    if (prevBtn) prevBtn.disabled = currentPage <= 1;
+    if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+    if (lastBtn) lastBtn.disabled = currentPage >= totalPages;
+
+    if (counter) counter.textContent = `${totalRecords.toLocaleString()} records`;
 }
 
 // ==========================================
 // Data Fetching & Table Rendering
 // ==========================================
-async function fetchKeys(isSilent = false) {
-    try {
-        const params = new URLSearchParams({
-            page: currentPage,
-            limit: pageSize,
-            sort: currentSort
-        });
-        if (activeTypeFilter !== 'ALL') params.append('type', activeTypeFilter);
-        if (activeNamespace) params.append('namespace', activeNamespace);
-        if (currentSearch) params.append('pattern', currentSearch);
-        if (activeVirtualDb && activeVirtualDb !== 'default' && activeVirtualDb !== 'db0') {
-            params.append('db', activeVirtualDb);
-        }
+async function fetchKeys() {
+    const tbody = document.getElementById('datasheetBody');
+    if (!tbody) return;
 
-        const res = await fetch(`/api/keys?${params.toString()}`);
+    try {
+        let url = `/api/keys?page=${currentPage}&limit=${pageSize}&sort=${currentSort}`;
+        if (activeTypeFilter !== 'ALL') url += `&type=${encodeURIComponent(activeTypeFilter)}`;
+        if (activeNamespace) url += `&namespace=${encodeURIComponent(activeNamespace)}`;
+        if (currentSearch) url += `&pattern=${encodeURIComponent(currentSearch)}`;
+        if (activeVirtualDb !== 'default') url += `&db=${encodeURIComponent(activeVirtualDb)}`;
+
+        const res = await fetch(url);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
 
-        currentPage = data.page || 1;
-        pageSize = data.limit || 50;
         totalRecords = data.total || 0;
-        totalPages = data.totalPages || 1;
+        totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
         currentPageKeys = data.keys || [];
 
-        updateSidebarCounts(data.typeCounts || {});
-        buildNamespaceTree(data.namespaces || []);
         renderTableRows();
         updatePaginationBar();
+        updateSidebarCounts(data.counts || {});
+        buildNamespaceTree(data.namespaces || []);
 
-        const counterEl = document.getElementById('recordCounter');
-        if (counterEl) {
-            counterEl.textContent = `Page ${currentPage} of ${totalPages} (${totalRecords.toLocaleString()} records)`;
-        }
-    } catch (e) {
-        if (!isSilent) {
-            const tbody = document.getElementById('datasheetBody');
-            if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="8" class="table-empty"><div class="empty-state"><span style="color:#ff6b81;">Error connecting to Redis: ${escapeHtml(e.message)}</span></div></td></tr>`;
-            }
-        }
+        // Also update overview KPI
+        const ovKeys = document.getElementById('ovTotalKeys');
+        if (ovKeys) ovKeys.textContent = totalRecords.toLocaleString();
+
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-red-500 font-medium">Failed to load data: ${escapeHtml(err.message)}</td></tr>`;
     }
 }
 
 function updateSidebarCounts(counts) {
-    const elAll = document.getElementById('countAll');
-    const elStr = document.getElementById('countStrings');
-    const elHsh = document.getElementById('countHashes');
-    const elLst = document.getElementById('countLists');
-    const elSet = document.getElementById('countSets');
-
-    if (elAll) elAll.textContent = (counts.ALL || 0).toLocaleString();
-    if (elStr) elStr.textContent = (counts.string || 0).toLocaleString();
-    if (elHsh) elHsh.textContent = (counts.hash || 0).toLocaleString();
-    if (elLst) elLst.textContent = (counts.list || 0).toLocaleString();
-    if (elSet) elSet.textContent = (counts.set || 0).toLocaleString();
+    if (document.getElementById('countAll')) document.getElementById('countAll').textContent = (counts.all ?? totalRecords).toLocaleString();
+    if (document.getElementById('countStrings')) document.getElementById('countStrings').textContent = (counts.string ?? 0).toLocaleString();
+    if (document.getElementById('countHashes')) document.getElementById('countHashes').textContent = (counts.hash ?? 0).toLocaleString();
+    if (document.getElementById('countLists')) document.getElementById('countLists').textContent = (counts.list ?? 0).toLocaleString();
+    if (document.getElementById('countSets')) document.getElementById('countSets').textContent = (counts.set ?? 0).toLocaleString();
 }
 
 function buildNamespaceTree(namespaces) {
-    const host = document.getElementById('namespaceTreeList');
-    if (!host) return;
+    const tree = document.getElementById('namespaceTreeList');
+    if (!tree) return;
 
     if (!namespaces || namespaces.length === 0) {
-        host.innerHTML = '<div class="tree-item empty">No namespaces (: delimiter)</div>';
+        tree.innerHTML = '<div class="px-3 py-1 text-gray-400 italic">No namespaces found</div>';
         return;
     }
 
-    host.innerHTML = namespaces.map(item => `
-        <div class="tree-folder ${activeNamespace === item.name ? 'active' : ''}" data-ns="${escapeHtml(item.name)}">
-            <iconify-icon icon="lucide:folder" class="f-icon" width="13"></iconify-icon>
-            <span class="f-name">${escapeHtml(item.name)}</span>
-            <span class="f-count">${item.count.toLocaleString()}</span>
+    tree.innerHTML = namespaces.map(ns => `
+        <div class="namespace-tree-item ${activeNamespace === ns.name ? 'active' : ''}" onclick="selectNamespace('${escapeHtml(ns.name)}')">
+            <div class="flex items-center gap-2">
+                <iconify-icon icon="lucide:folder" width="13" class="${activeNamespace === ns.name ? 'text-purple-600' : 'text-gray-400'}"></iconify-icon>
+                <span class="truncate">${escapeHtml(ns.name)}</span>
+            </div>
+            <span class="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">${ns.count}</span>
         </div>
     `).join('');
+}
 
-    host.querySelectorAll('.tree-folder').forEach(el => {
-        el.addEventListener('click', () => {
-            const ns = el.dataset.ns;
-            if (activeNamespace === ns) {
-                activeNamespace = null;
-                el.classList.remove('active');
-            } else {
-                host.querySelectorAll('.tree-folder').forEach(f => f.classList.remove('active'));
-                el.classList.add('active');
-                activeNamespace = ns;
-            }
-            currentPage = 1;
-            updateBreadcrumb();
-            fetchKeys();
-        });
-    });
+function selectNamespace(nsName) {
+    if (activeNamespace === nsName) {
+        activeNamespace = null;
+    } else {
+        activeNamespace = nsName;
+    }
+    currentPage = 1;
+    updateBreadcrumb();
+    fetchKeys();
 }
 
 function renderTableRows() {
@@ -410,14 +1000,10 @@ function renderTableRows() {
     if (currentPageKeys.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" class="table-empty">
-                    <div class="empty-state">
-                        <iconify-icon icon="lucide:database-zap" width="36" height="36" style="color: var(--text-dim);"></iconify-icon>
-                        <p>No records matching query.</p>
-                        <button class="btn btn-primary btn-sm" onclick="openInsertModal()">
-                            <iconify-icon icon="lucide:plus" width="13"></iconify-icon>
-                            Insert Record
-                        </button>
+                <td colspan="8" class="p-12 text-center text-gray-400">
+                    <div class="flex flex-col items-center justify-center gap-2">
+                        <iconify-icon icon="lucide:database" width="32" class="text-gray-300"></iconify-icon>
+                        <span class="text-sm font-medium text-gray-500">No records found matching current filter</span>
                     </div>
                 </td>
             </tr>
@@ -425,1943 +1011,564 @@ function renderTableRows() {
         return;
     }
 
-    tbody.innerHTML = currentPageKeys.map((k, index) => {
-        const isChecked = selectedKeys.has(k.key);
-        const typeClass = getTypeBadgeClass(k.type);
-        const ttlLabel = k.ttl === -1 ? 'Persistent' : (k.ttl <= 0 ? 'Expired' : `${k.ttl}s remaining`);
-        const ttlClass = k.ttl > 0 ? 'expiring' : '';
-        const sizeLabel = k.type === 'string' ? `${k.size} B` : `${k.size} items`;
-        const globalIndex = (currentPage - 1) * pageSize + index + 1;
+    const startIdx = (currentPage - 1) * pageSize;
+    tbody.innerHTML = currentPageKeys.map((item, idx) => {
+        const isChecked = selectedKeys.has(item.key);
+        const rowNum = startIdx + idx + 1;
+        const typeClass = `badge-${item.type.toLowerCase()}`;
+        const ttlDisplay = item.ttl < 0 ? '<span class="text-gray-400 font-mono text-xs">Persistent</span>' : `<span class="text-amber-600 font-mono text-xs font-semibold">${item.ttl}s</span>`;
 
         return `
-            <tr class="${isChecked ? 'selected' : ''}" data-key="${escapeHtml(k.key)}">
-                <td class="col-checkbox">
-                    <input type="checkbox" class="row-checkbox" data-key="${escapeHtml(k.key)}" ${isChecked ? 'checked' : ''}>
+            <tr class="hover:bg-gray-50/80 transition-colors ${isChecked ? 'bg-purple-50/40' : ''}">
+                <td class="py-3 px-4 text-center">
+                    <input type="checkbox" class="rounded border-gray-300 text-purple-600 focus:ring-purple-500" ${isChecked ? 'checked' : ''} onchange="toggleSelectKey('${escapeHtml(item.key)}', this.checked)">
                 </td>
-                <td class="col-num">${globalIndex}</td>
-                <td class="col-key">
-                    <span class="key-clickable" onclick="openInspector('${escapeHtml(k.key)}')">
-                        ${escapeHtml(k.key)}
-                    </span>
+                <td class="py-3 px-4 text-center text-gray-400 font-mono text-xs">${rowNum}</td>
+                <td class="py-3 px-4 font-mono text-xs font-medium text-gray-900 cursor-pointer hover:text-purple-600 truncate max-w-xs" onclick="inspectKey('${escapeHtml(item.key)}')">
+                    ${escapeHtml(item.key)}
                 </td>
-                <td class="col-type">
-                    <span class="badge-type ${typeClass}">${escapeHtml(k.type)}</span>
+                <td class="py-3 px-4">
+                    <span class="px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider ${typeClass}">${item.type}</span>
                 </td>
-                <td class="col-preview">
-                    <span class="preview-trunc" title="${escapeHtml(k.preview || '')}">${escapeHtml(k.preview || '(empty)')}</span>
+                <td class="py-3 px-4 font-mono text-xs text-gray-500 truncate max-w-xs cursor-pointer" onclick="inspectKey('${escapeHtml(item.key)}')">
+                    ${escapeHtml(item.preview || '')}
                 </td>
-                <td class="col-size">${sizeLabel}</td>
-                <td class="col-ttl">
-                    <span class="ttl-text ${ttlClass}">
-                        <iconify-icon icon="lucide:clock" width="12" style="vertical-align: middle; margin-right: 3px;"></iconify-icon>${ttlLabel}
-                    </span>
-                </td>
-                <td class="col-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="openInspector('${escapeHtml(k.key)}')" title="Inspect / Edit">
-                        <iconify-icon icon="lucide:eye" width="12"></iconify-icon>
-                    </button>
-                    <button class="btn btn-outline-danger btn-sm" onclick="quickDeleteKey('${escapeHtml(k.key)}')" title="Delete" style="margin-left: 2px;">
-                        <iconify-icon icon="lucide:trash-2" width="12"></iconify-icon>
-                    </button>
+                <td class="py-3 px-4 font-mono text-xs text-gray-500">${formatBytes(item.size || 0)}</td>
+                <td class="py-3 px-4">${ttlDisplay}</td>
+                <td class="py-3 px-4 text-right">
+                    <div class="flex items-center justify-end gap-1">
+                        <button class="p-1 text-gray-400 hover:text-purple-600 rounded hover:bg-purple-50" onclick="inspectKey('${escapeHtml(item.key)}')" title="Inspect / Edit">
+                            <iconify-icon icon="lucide:eye" width="15"></iconify-icon>
+                        </button>
+                        <button class="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50" onclick="deleteSingleKey('${escapeHtml(item.key)}')" title="Delete Key">
+                            <iconify-icon icon="lucide:trash-2" width="15"></iconify-icon>
+                        </button>
+                    </div>
                 </td>
             </tr>
         `;
     }).join('');
-
-    // Attach row checkbox handlers
-    tbody.querySelectorAll('.row-checkbox').forEach(cb => {
-        cb.addEventListener('change', (e) => {
-            const key = e.target.dataset.key;
-            if (e.target.checked) {
-                selectedKeys.add(key);
-            } else {
-                selectedKeys.delete(key);
-            }
-            updateBatchBar();
-            const tr = cb.closest('tr');
-            if (tr) tr.classList.toggle('selected', e.target.checked);
-        });
-    });
 }
 
-function getTypeBadgeClass(type) {
-    switch (type.toLowerCase()) {
-        case 'string': return 'str';
-        case 'hash': return 'hsh';
-        case 'list': return 'lst';
-        case 'set': return 'st';
-        default: return '';
+function toggleSelectKey(key, isChecked) {
+    if (isChecked) {
+        selectedKeys.add(key);
+    } else {
+        selectedKeys.delete(key);
     }
+    updateBatchBar();
 }
 
-async function quickDeleteKey(key) {
+async function deleteSingleKey(key) {
     if (!confirm(`Delete key "${key}"?`)) return;
     try {
-        const endpoint = `/api/key?key=${encodeURIComponent(key)}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`;
-        const res = await fetch(endpoint, { method: 'DELETE' });
+        const res = await fetch(`/api/key?key=${encodeURIComponent(key)}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`, {
+            method: 'DELETE'
+        });
         if (res.ok) {
-            showToast(`Deleted "${key}"`);
+            showToast(`Deleted key: ${key}`);
             selectedKeys.delete(key);
             updateBatchBar();
             fetchKeys();
             fetchStats();
+            if (activeInspectKey === key) closeInspector();
         }
-    } catch (e) {
-        showToast('Error deleting: ' + e.message, true);
+    } catch (err) {
+        showToast('Delete failed: ' + err.message, true);
     }
 }
 
 // ==========================================
-// Right Side Record Inspector & Editor
+// Inspector Drawer
 // ==========================================
 function initInspector() {
-    const drawer = document.getElementById('recordInspector');
     const closeBtn = document.getElementById('closeInspectorBtn');
     const cancelBtn = document.getElementById('inspCancelBtn');
+    const deleteBtn = document.getElementById('inspDeleteRecordBtn');
+    const saveBtn = document.getElementById('inspSaveRecordBtn');
+    const setTtlBtn = document.getElementById('inspSetTtlBtn');
+    const persistBtn = document.getElementById('inspPersistBtn');
 
-    closeBtn.addEventListener('click', closeInspector);
-    cancelBtn.addEventListener('click', closeInspector);
+    if (closeBtn) closeBtn.addEventListener('click', closeInspector);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeInspector);
 
-    document.getElementById('inspDeleteRecordBtn').addEventListener('click', () => {
-        if (activeInspectKey) {
-            quickDeleteKey(activeInspectKey);
-            closeInspector();
-        }
-    });
-
-    document.getElementById('inspSetTtlBtn').addEventListener('click', async () => {
-        if (!activeInspectKey) return;
-        const val = parseInt(document.getElementById('inspTtlSeconds').value, 10);
-        if (isNaN(val) || val <= 0) {
-            showToast('Enter valid positive seconds', true);
-            return;
-        }
-        await fetch('/api/exec', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: `EXPIRE "${activeInspectKey}" ${val}`, db: activeVirtualDb })
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', () => {
+            if (activeInspectKey) deleteSingleKey(activeInspectKey);
         });
-        showToast(`TTL updated to ${val}s`);
-        openInspector(activeInspectKey);
-        fetchKeys();
-    });
+    }
 
-    document.getElementById('inspPersistBtn').addEventListener('click', async () => {
-        if (!activeInspectKey) return;
-        await fetch('/api/exec', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: `PERSIST "${activeInspectKey}"`, db: activeVirtualDb })
-        });
-        showToast(`Key is now persistent`);
-        document.getElementById('inspTtlSeconds').value = '';
-        openInspector(activeInspectKey);
-        fetchKeys();
-    });
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async () => {
+            if (!activeInspectKey || !inspectCache) return;
+            const contentHost = document.getElementById('inspectorContentHost');
+            const type = inspectCache.type.toLowerCase();
 
-    document.getElementById('inspSaveRecordBtn').addEventListener('click', async () => {
-        if (!activeInspectKey || !inspectCache) return;
+            try {
+                let payload = {};
+                if (type === 'string') {
+                    const textarea = contentHost.querySelector('textarea');
+                    payload.value = textarea ? textarea.value : '';
+                } else if (type === 'hash') {
+                    const fields = {};
+                    contentHost.querySelectorAll('.hash-field-row').forEach(row => {
+                        const f = row.querySelector('.hash-f-name').value.trim();
+                        const v = row.querySelector('.hash-f-val').value;
+                        if (f) fields[f] = v;
+                    });
+                    payload.fields = fields;
+                } else if (type === 'list' || type === 'set') {
+                    const items = [];
+                    contentHost.querySelectorAll('.list-item-row input').forEach(inp => {
+                        if (inp.value) items.push(inp.value);
+                    });
+                    payload.items = items;
+                }
 
-        let payloadValue;
-        if (inspectCache.type === 'string') {
-            payloadValue = document.getElementById('inspTextValue').value;
-        } else if (inspectCache.type === 'hash') {
-            const hashObj = {};
-            document.querySelectorAll('.hash-table-editor tbody tr').forEach(tr => {
-                const f = tr.querySelector('.hash-f-name').value.trim();
-                const v = tr.querySelector('.hash-f-val').value;
-                if (f) hashObj[f] = v;
-            });
-            payloadValue = hashObj;
-        } else if (inspectCache.type === 'list' || inspectCache.type === 'set') {
-            const arr = [];
-            document.querySelectorAll('.list-val-input').forEach(inp => {
-                if (inp.value.trim()) arr.push(inp.value.trim());
-            });
-            payloadValue = arr;
-        }
+                const res = await fetch(`/api/key?key=${encodeURIComponent(activeInspectKey)}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
 
-        const ttlNum = parseInt(document.getElementById('inspTtlSeconds').value, 10);
-        const ttl = !isNaN(ttlNum) && ttlNum > 0 ? ttlNum : null;
-
-        try {
-            const res = await fetch('/api/key', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    key: activeInspectKey,
-                    type: inspectCache.type,
-                    value: payloadValue,
-                    ttl: ttl,
-                    db: activeVirtualDb
-                })
-            });
-            const d = await res.json();
-            if (d.success) {
-                showToast(`Record "${activeInspectKey}" saved successfully`);
-                fetchKeys();
-                fetchStats();
-            } else {
-                showToast(d.error || 'Failed to save', true);
+                if (res.ok) {
+                    showToast('Key saved successfully');
+                    fetchKeys();
+                    fetchStats();
+                    inspectKey(activeInspectKey);
+                }
+            } catch (err) {
+                showToast('Save failed: ' + err.message, true);
             }
-        } catch (e) {
-            showToast('Save error: ' + e.message, true);
-        }
-    });
+        });
+    }
+
+    if (setTtlBtn) {
+        setTtlBtn.addEventListener('click', async () => {
+            if (!activeInspectKey) return;
+            const ttlInput = document.getElementById('inspTtlSeconds');
+            const seconds = parseInt(ttlInput.value, 10);
+            if (isNaN(seconds) || seconds < 0) return showToast('Enter valid TTL seconds', true);
+
+            try {
+                const res = await fetch(`/api/expire?key=${encodeURIComponent(activeInspectKey)}&seconds=${seconds}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`, {
+                    method: 'POST'
+                });
+                if (res.ok) {
+                    showToast(`TTL set to ${seconds}s`);
+                    inspectKey(activeInspectKey);
+                    fetchKeys();
+                }
+            } catch (err) {
+                showToast('Set TTL failed: ' + err.message, true);
+            }
+        });
+    }
+
+    if (persistBtn) {
+        persistBtn.addEventListener('click', async () => {
+            if (!activeInspectKey) return;
+            try {
+                const res = await fetch(`/api/persist?key=${encodeURIComponent(activeInspectKey)}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`, {
+                    method: 'POST'
+                });
+                if (res.ok) {
+                    showToast('Key persisted (TTL removed)');
+                    inspectKey(activeInspectKey);
+                    fetchKeys();
+                }
+            } catch (err) {
+                showToast('Persist failed: ' + err.message, true);
+            }
+        });
+    }
 }
 
-async function openInspector(key) {
+async function inspectKey(key) {
     activeInspectKey = key;
+    const drawer = document.getElementById('recordInspector');
+    if (!drawer) return;
+
+    drawer.classList.add('open');
+    document.getElementById('inspKeyTitle').textContent = key;
+    document.getElementById('inspTypeBadge').textContent = 'LOADING';
+
     try {
-        const endpoint = `/api/key?key=${encodeURIComponent(key)}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`;
-        const res = await fetch(endpoint);
-        if (!res.ok) throw new Error('Key not found or expired');
-        const details = await res.json();
-        inspectCache = details;
+        const res = await fetch(`/api/key?key=${encodeURIComponent(key)}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        inspectCache = data;
 
-        document.getElementById('inspKeyTitle').textContent = details.key;
-        const typeBadge = document.getElementById('inspTypeBadge');
-        typeBadge.textContent = details.type.toUpperCase();
-        typeBadge.className = `badge-type ${getTypeBadgeClass(details.type)}`;
+        document.getElementById('inspTypeBadge').textContent = data.type.toUpperCase();
+        document.getElementById('inspMetaType').textContent = data.type;
+        document.getElementById('inspMetaSize').textContent = formatBytes(data.size || 0);
+        document.getElementById('inspMetaTtl').textContent = data.ttl < 0 ? 'No Expiry (-1)' : `${data.ttl}s`;
+        document.getElementById('inspTtlSeconds').value = data.ttl > 0 ? data.ttl : '';
 
-        document.getElementById('inspMetaType').textContent = details.type.toUpperCase();
-        document.getElementById('inspMetaSize').textContent = details.type === 'string' ? `${details.size} bytes` : `${details.size} items`;
-        document.getElementById('inspMetaTtl').textContent = details.ttl === -1 ? 'Persistent (-1)' : `${details.ttl}s`;
-        document.getElementById('inspTtlSeconds').value = details.ttl > 0 ? details.ttl : '';
-
-        // Render type-specific editor
-        renderInspectorContent(details);
-
-        document.getElementById('recordInspector').classList.add('open');
-    } catch (e) {
-        showToast('Error loading record: ' + e.message, true);
+        renderInspectorContent(data);
+    } catch (err) {
+        document.getElementById('inspectorContentHost').innerHTML = `<div class="p-4 text-sm text-red-500">Failed to load key: ${escapeHtml(err.message)}</div>`;
     }
 }
 
 function closeInspector() {
-    document.getElementById('recordInspector').classList.remove('open');
+    const drawer = document.getElementById('recordInspector');
+    if (drawer) drawer.classList.remove('open');
     activeInspectKey = null;
     inspectCache = null;
 }
 
-function renderInspectorContent(details) {
+function renderInspectorContent(data) {
     const host = document.getElementById('inspectorContentHost');
     const tools = document.getElementById('contentTools');
+    if (!host) return;
+
     tools.innerHTML = '';
+    const type = data.type.toLowerCase();
 
-    if (details.type === 'string') {
-        tools.innerHTML = `<button class="chip" id="fmtJsonBtn"><iconify-icon icon="lucide:code-2" width="12" style="vertical-align: middle;"></iconify-icon> Format JSON</button>`;
-        host.innerHTML = `<textarea id="inspTextValue" class="editor-textarea">${escapeHtml(details.value)}</textarea>`;
-
-        document.getElementById('fmtJsonBtn')?.addEventListener('click', () => {
-            const ta = document.getElementById('inspTextValue');
-            try {
-                const parsed = JSON.parse(ta.value);
-                ta.value = JSON.stringify(parsed, null, 2);
-                showToast('JSON Formatted');
-            } catch (e) {
-                showToast('Not valid JSON', true);
-            }
-        });
-
-    } else if (details.type === 'hash') {
-        tools.innerHTML = `<button class="chip" id="addHashFieldBtn"><iconify-icon icon="lucide:plus" width="12" style="vertical-align: middle;"></iconify-icon> Add Field</button>`;
-        const entries = Object.entries(details.value || {});
-        let html = '<table class="hash-table-editor"><thead><tr><th>Field</th><th>Value</th><th style="width:30px;"></th></tr></thead><tbody>';
-        entries.forEach(([f, v]) => {
-            html += `
-                <tr>
-                    <td><input type="text" class="hash-input hash-f-name" value="${escapeHtml(f)}"></td>
-                    <td><input type="text" class="hash-input hash-f-val" value="${escapeHtml(v)}"></td>
-                    <td><button class="drawer-btn" onclick="this.closest('tr').remove()"><iconify-icon icon="lucide:trash-2" width="13"></iconify-icon></button></td>
-                </tr>
-            `;
-        });
-        html += '</tbody></table>';
-        host.innerHTML = html;
-
-        document.getElementById('addHashFieldBtn')?.addEventListener('click', () => {
-            const tbody = host.querySelector('tbody');
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><input type="text" class="hash-input hash-f-name" placeholder="new_field"></td>
-                <td><input type="text" class="hash-input hash-f-val" placeholder="value"></td>
-                <td><button class="drawer-btn" onclick="this.closest('tr').remove()"><iconify-icon icon="lucide:trash-2" width="13"></iconify-icon></button></td>
-            `;
-            tbody.appendChild(tr);
-        });
-
-    } else if (details.type === 'list' || details.type === 'set') {
-        const isList = details.type === 'list';
-        tools.innerHTML = `<button class="chip" id="addListItemBtn"><iconify-icon icon="lucide:plus" width="12" style="vertical-align: middle;"></iconify-icon> Append ${isList ? 'Item' : 'Member'}</button>`;
-        const items = details.value || [];
-        let html = '<div class="list-editor-container" style="max-height: 280px; overflow-y: auto;">';
-        items.forEach((item, idx) => {
-            html += `
-                <div class="list-item-row">
-                    <span class="list-idx">${idx + 1}.</span>
-                    <input type="text" class="list-val-input" value="${escapeHtml(item)}">
-                    <button class="drawer-btn" onclick="this.closest('.list-item-row').remove()"><iconify-icon icon="lucide:trash-2" width="13"></iconify-icon></button>
-                </div>
-            `;
-        });
-        html += '</div>';
-        host.innerHTML = html;
-
-        document.getElementById('addListItemBtn')?.addEventListener('click', () => {
-            const container = host.querySelector('.list-editor-container');
-            const row = document.createElement('div');
-            row.className = 'list-item-row';
-            const count = container.children.length + 1;
-            row.innerHTML = `
-                <span class="list-idx">${count}.</span>
-                <input type="text" class="list-val-input" placeholder="New ${isList ? 'element' : 'member'}">
-                <button class="drawer-btn" onclick="this.closest('.list-item-row').remove()"><iconify-icon icon="lucide:trash-2" width="13"></iconify-icon></button>
-            `;
-            container.appendChild(row);
-        });
+    if (type === 'string') {
+        tools.innerHTML = `
+            <button class="text-xs text-purple-600 hover:text-purple-800 font-semibold" onclick="beautifyJsonInspector()">Beautify JSON</button>
+        `;
+        host.innerHTML = `
+            <textarea id="inspStringValue" rows="8" class="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs font-mono text-gray-800 focus:outline-none focus:bg-white focus:border-purple-500">${escapeHtml(data.value || '')}</textarea>
+        `;
+    } else if (type === 'hash') {
+        const fields = data.fields || {};
+        tools.innerHTML = `
+            <button class="text-xs text-purple-600 hover:text-purple-800 font-semibold flex items-center gap-1" onclick="addHashFieldRow()">
+                <iconify-icon icon="lucide:plus" width="12"></iconify-icon> Add Field
+            </button>
+        `;
+        host.innerHTML = `
+            <div class="space-y-2 max-h-60 overflow-y-auto" id="hashFieldsList">
+                ${Object.entries(fields).map(([k, v]) => `
+                    <div class="hash-field-row flex items-center gap-2">
+                        <input type="text" class="hash-f-name w-1/3 bg-white border border-gray-200 rounded px-2 py-1 text-xs font-mono" value="${escapeHtml(k)}">
+                        <input type="text" class="hash-f-val flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-xs font-mono" value="${escapeHtml(v)}">
+                        <button class="text-gray-400 hover:text-red-500" onclick="this.parentElement.remove()"><iconify-icon icon="lucide:x" width="14"></iconify-icon></button>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    } else if (type === 'list' || type === 'set') {
+        const items = data.items || [];
+        tools.innerHTML = `
+            <button class="text-xs text-purple-600 hover:text-purple-800 font-semibold flex items-center gap-1" onclick="addListItemRow()">
+                <iconify-icon icon="lucide:plus" width="12"></iconify-icon> Add Element
+            </button>
+        `;
+        host.innerHTML = `
+            <div class="space-y-2 max-h-60 overflow-y-auto" id="listItemsContainer">
+                ${items.map((it, i) => `
+                    <div class="list-item-row flex items-center gap-2">
+                        <span class="text-gray-400 font-mono text-xs w-6">${i}</span>
+                        <input type="text" class="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-xs font-mono" value="${escapeHtml(it)}">
+                        <button class="text-gray-400 hover:text-red-500" onclick="this.parentElement.remove()"><iconify-icon icon="lucide:x" width="14"></iconify-icon></button>
+                    </div>
+                `).join('')}
+            </div>
+        `;
     }
 }
 
+function beautifyJsonInspector() {
+    const textarea = document.getElementById('inspStringValue');
+    if (!textarea) return;
+    try {
+        const parsed = JSON.parse(textarea.value);
+        textarea.value = JSON.stringify(parsed, null, 2);
+    } catch (e) {
+        showToast('Not valid JSON', true);
+    }
+}
+
+function addHashFieldRow() {
+    const list = document.getElementById('hashFieldsList');
+    if (!list) return;
+    const div = document.createElement('div');
+    div.className = 'hash-field-row flex items-center gap-2';
+    div.innerHTML = `
+        <input type="text" class="hash-f-name w-1/3 bg-white border border-gray-200 rounded px-2 py-1 text-xs font-mono" placeholder="field">
+        <input type="text" class="hash-f-val flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-xs font-mono" placeholder="value">
+        <button class="text-gray-400 hover:text-red-500" onclick="this.parentElement.remove()"><iconify-icon icon="lucide:x" width="14"></iconify-icon></button>
+    `;
+    list.appendChild(div);
+}
+
+function addListItemRow() {
+    const container = document.getElementById('listItemsContainer');
+    if (!container) return;
+    const div = document.createElement('div');
+    div.className = 'list-item-row flex items-center gap-2';
+    div.innerHTML = `
+        <span class="text-gray-400 font-mono text-xs w-6">•</span>
+        <input type="text" class="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-xs font-mono" placeholder="item value">
+        <button class="text-gray-400 hover:text-red-500" onclick="this.parentElement.remove()"><iconify-icon icon="lucide:x" width="14"></iconify-icon></button>
+    `;
+    container.appendChild(div);
+}
+
 // ==========================================
-// Bottom Dockable Web CLI Drawer
+// Terminal CLI Drawer
 // ==========================================
 function initTerminalDrawer() {
-    const drawer = document.getElementById('terminalDrawer');
     const toggleBtn = document.getElementById('toggleTerminalBtn');
+    const drawer = document.getElementById('terminalDrawer');
     const closeBtn = document.getElementById('drawerCloseBtn');
     const expandBtn = document.getElementById('drawerExpandBtn');
     const form = document.getElementById('drawerForm');
     const input = document.getElementById('drawerInput');
 
-    toggleBtn.addEventListener('click', () => {
-        drawer.classList.toggle('collapsed');
-        if (!drawer.classList.contains('collapsed')) {
-            input.focus();
-        }
-    });
-
-    closeBtn.addEventListener('click', () => drawer.classList.add('collapsed'));
-
-    expandBtn.addEventListener('click', () => {
-        drawer.classList.toggle('expanded');
-    });
-
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const cmd = input.value.trim();
-        if (!cmd) return;
-        await execCliCommand(cmd);
-        input.value = '';
-    });
-}
-
-async function execCliShortcut(cmd) {
-    const drawer = document.getElementById('terminalDrawer');
-    drawer.classList.remove('collapsed');
-    await execCliCommand(cmd);
-}
-
-async function execCliCommand(cmdStr) {
-    const out = document.getElementById('drawerOutput');
-
-    const cmdLine = document.createElement('div');
-    cmdLine.className = 'term-line cmd';
-    cmdLine.textContent = `redis-cli> ${cmdStr}`;
-    out.appendChild(cmdLine);
-
-    try {
-        const res = await fetch('/api/exec', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmdStr, db: activeVirtualDb })
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            drawer.classList.toggle('open');
+            if (drawer.classList.contains('open')) input.focus();
         });
-        const data = await res.json();
-
-        const respLine = document.createElement('div');
-        respLine.className = 'term-line ' + (data.success ? 'resp' : 'err');
-        respLine.textContent = data.output ?? data.error ?? '(nil)';
-        out.appendChild(respLine);
-
-        // Auto reload table and stats so user sees immediate results
-        fetchKeys(true);
-        fetchStats();
-    } catch (e) {
-        const errLine = document.createElement('div');
-        errLine.className = 'term-line err';
-        errLine.textContent = 'Network error: ' + e.message;
-        out.appendChild(errLine);
     }
 
-    out.scrollTop = out.scrollHeight;
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            drawer.classList.remove('open');
+        });
+    }
+
+    if (expandBtn) {
+        expandBtn.addEventListener('click', () => {
+            drawer.classList.toggle('expanded');
+        });
+    }
+
+    if (form) {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const cmd = input.value.trim();
+            if (!cmd) return;
+            input.value = '';
+            appendTerminalLine(`redis-cli> ${cmd}`, 'prompt');
+
+            try {
+                const res = await fetch(`/api/cli?cmd=${encodeURIComponent(cmd)}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+                appendTerminalLine(data.output || '(nil)', data.error ? 'error' : 'output');
+                fetchKeys();
+                fetchStats();
+            } catch (err) {
+                appendTerminalLine('Error: ' + err.message, 'error');
+            }
+        });
+    }
+}
+
+function execCliShortcut(cmd) {
+    const input = document.getElementById('drawerInput');
+    if (input) {
+        input.value = cmd;
+        document.getElementById('drawerForm').dispatchEvent(new Event('submit'));
+    }
 }
 
 function clearCliTerminal() {
-    document.getElementById('drawerOutput').innerHTML = '<div class="term-line welcome">Terminal output cleared.</div>';
+    const out = document.getElementById('drawerOutput');
+    if (out) out.innerHTML = '';
 }
 
-// ==========================================
-// Export & Import
-// ==========================================
-function initExportImport() {
-    const exportBtn = document.getElementById('exportDataBtn');
-    const importBtn = document.getElementById('importDataBtn');
-    const importFileInput = document.getElementById('importFileInput');
-
-    exportBtn.addEventListener('click', async () => {
-        try {
-            const endpoint = `/api/export${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`;
-            const res = await fetch(endpoint);
-            const data = await res.json();
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `redis_dump_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-            showToast('Database exported to JSON');
-        } catch (e) {
-            showToast('Export failed: ' + e.message, true);
-        }
-    });
-
-    importBtn.addEventListener('click', () => importFileInput.click());
-
-    importFileInput.addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-            try {
-                const json = JSON.parse(evt.target.result);
-                const res = await fetch('/api/import', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ...json, db: activeVirtualDb })
-                });
-                const d = await res.json();
-                if (d.success) {
-                    showToast(`Imported ${d.importedCount} records successfully`);
-                    fetchKeys();
-                    fetchStats();
-                } else {
-                    showToast(d.error || 'Import failed', true);
-                }
-            } catch (err) {
-                showToast('Invalid JSON file: ' + err.message, true);
-            }
-        };
-        reader.readAsText(file);
-        e.target.value = '';
-    });
+function appendTerminalLine(text, type = 'output') {
+    const out = document.getElementById('drawerOutput');
+    if (!out) return;
+    const div = document.createElement('div');
+    div.className = `leading-relaxed ${type === 'prompt' ? 'text-gray-400 font-semibold' : type === 'error' ? 'text-red-400' : 'text-emerald-400'}`;
+    div.textContent = text;
+    out.appendChild(div);
+    out.scrollTop = out.scrollHeight;
 }
 
 // ==========================================
 // Insert Record Modal
 // ==========================================
 function initInsertModal() {
-    document.getElementById('openInsertModalBtn').addEventListener('click', openInsertModal);
+    const submitBtn = document.getElementById('insSubmitBtn');
+    const typeSelect = document.getElementById('insType');
 
-    const typeSel = document.getElementById('insType');
-    typeSel.addEventListener('change', () => {
-        const t = typeSel.value;
-        const lbl = document.getElementById('insValueLabel');
-        const hint = document.getElementById('insValueHint');
-        const area = document.getElementById('insValue');
-
-        if (t === 'string') {
-            lbl.textContent = 'Value (String) *';
-            hint.textContent = 'Plain text or JSON payload';
-            area.placeholder = 'e.g. Hello Redis!';
-        } else if (t === 'hash') {
-            lbl.textContent = 'Fields (JSON Object) *';
-            hint.textContent = 'JSON object format: {"field": "value"}';
-            area.placeholder = '{\n  "name": "Alice",\n  "role": "admin"\n}';
-        } else if (t === 'list') {
-            lbl.textContent = 'List Items (Comma separated) *';
-            hint.textContent = 'Comma-separated string elements';
-            area.placeholder = 'task_1, task_2, task_3';
-        } else if (t === 'set') {
-            lbl.textContent = 'Set Members (Comma separated) *';
-            hint.textContent = 'Unique elements separated by commas';
-            area.placeholder = 'member_a, member_b, member_c';
-        }
-    });
-
-    document.getElementById('insSubmitBtn').addEventListener('click', async () => {
-        const key = document.getElementById('insKey').value.trim();
-        const type = document.getElementById('insType').value;
-        const rawVal = document.getElementById('insValue').value.trim();
-        const ttlNum = parseInt(document.getElementById('insTtl').value, 10);
-        const ttl = !isNaN(ttlNum) && ttlNum > 0 ? ttlNum : null;
-
-        if (!key) {
-            showToast('Key is required', true);
-            return;
-        }
-
-        let parsed = rawVal;
-        if (type === 'hash') {
-            try {
-                parsed = JSON.parse(rawVal);
-            } catch (e) {
-                showToast('Invalid JSON for hash: ' + e.message, true);
-                return;
-            }
-        }
-
-        try {
-            const res = await fetch('/api/key', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key, type, value: parsed, ttl, db: activeVirtualDb })
-            });
-            const data = await res.json();
-            if (data.success) {
-                showToast(`Record "${key}" inserted`);
-                closeInsertModal();
-                fetchKeys();
-                fetchStats();
+    if (typeSelect) {
+        typeSelect.addEventListener('change', () => {
+            const val = typeSelect.value;
+            const lbl = document.getElementById('insValueLabel');
+            const hint = document.getElementById('insValueHint');
+            if (val === 'string') {
+                lbl.textContent = 'Value Content *';
+                hint.textContent = 'Raw string or JSON string';
+            } else if (val === 'hash') {
+                lbl.textContent = 'Hash JSON Object *';
+                hint.textContent = 'e.g. {"name": "Alice", "role": "admin"}';
             } else {
-                showToast(data.error || 'Failed to insert', true);
+                lbl.textContent = 'JSON Array of Elements *';
+                hint.textContent = 'e.g. ["item1", "item2", "item3"]';
             }
-        } catch (e) {
-            showToast('Insert error: ' + e.message, true);
-        }
-    });
+        });
+    }
+
+    if (submitBtn) {
+        submitBtn.addEventListener('click', async () => {
+            const key = document.getElementById('insKey').value.trim();
+            const type = document.getElementById('insType').value;
+            const rawVal = document.getElementById('insValue').value.trim();
+            const ttl = parseInt(document.getElementById('insTtl').value, 10);
+
+            if (!key) return showToast('Key is required', true);
+
+            let payload = { key, type };
+            if (!isNaN(ttl) && ttl > 0) payload.ttl = ttl;
+
+            try {
+                if (type === 'string') {
+                    payload.value = rawVal;
+                } else if (type === 'hash') {
+                    payload.fields = JSON.parse(rawVal);
+                } else if (type === 'list' || type === 'set') {
+                    payload.items = JSON.parse(rawVal);
+                }
+
+                const res = await fetch(`/api/key${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (res.ok) {
+                    showToast(`Record "${key}" inserted`);
+                    closeInsertModal();
+                    fetchKeys();
+                    fetchStats();
+                } else {
+                    const err = await res.json();
+                    showToast(err.error || 'Insert failed', true);
+                }
+            } catch (err) {
+                showToast('Invalid payload: ' + err.message, true);
+            }
+        });
+    }
 }
 
 function openInsertModal() {
-    document.getElementById('insKey').value = '';
-    document.getElementById('insValue').value = '';
-    document.getElementById('insTtl').value = '';
-    document.getElementById('insertModal').classList.add('open');
+    const modal = document.getElementById('insertModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        document.getElementById('insKey').focus();
+    }
 }
 
 function closeInsertModal() {
-    document.getElementById('insertModal').classList.remove('open');
+    const modal = document.getElementById('insertModal');
+    if (modal) modal.classList.add('hidden');
 }
 
 // ==========================================
-// Telemetry & Live Polling
-// ==========================================
-function initLiveSync() {
-    const chk = document.getElementById('autoPollCheck');
-    function syncTimer() {
-        if (chk.checked) {
-            if (!pollTimer) {
-                pollTimer = setInterval(() => {
-                    fetchStats();
-                    fetchKeys(true);
-                }, 3000);
-            }
-        } else {
-            if (pollTimer) {
-                clearInterval(pollTimer);
-                pollTimer = null;
-            }
-        }
-    }
-    chk.addEventListener('change', syncTimer);
-    syncTimer();
-}
-
-async function fetchStats() {
-    try {
-        const endpoint = `/api/stats${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`;
-        const res = await fetch(endpoint);
-        if (!res.ok) return;
-        const stats = await res.json();
-
-        document.getElementById('sbMemory').textContent = stats.used_memory_human || '0 B';
-        document.getElementById('sbCommands').textContent = (stats.total_commands_processed || 0).toLocaleString();
-        document.getElementById('sbUptime').textContent = formatUptimeShort(stats.uptime_in_seconds);
-
-        if (stats.databases) {
-            databasesCache = stats.databases;
-            updateVirtualDatabaseSelector(databasesCache, stats.activeDb);
-        }
-    } catch (ignored) {}
-}
-
-function formatUptimeShort(sec) {
-    if (!sec || sec <= 0) return '0s';
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    if (m > 0) return `${m}m ${s}s`;
-    return `${s}s`;
-}
-
-function escapeHtml(str) {
-    if (typeof str !== 'string') return String(str ?? '');
-    return str.replace(/[&<>"']/g, m => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    })[m]);
-}
-
-function showToast(msg, isErr = false) {
-    const shelf = document.getElementById('toastContainer');
-    const toast = document.createElement('div');
-    toast.className = 'toast-item';
-    toast.style.borderColor = isErr ? 'var(--brand-red)' : 'var(--accent-green)';
-    toast.innerHTML = `<span><iconify-icon icon="${isErr ? 'lucide:alert-circle' : 'lucide:check-circle-2'}" width="16" style="color: ${isErr ? 'var(--brand-red)' : 'var(--accent-green)'}; vertical-align: middle;"></iconify-icon></span> <span>${escapeHtml(msg)}</span>`;
-    shelf.appendChild(toast);
-
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        setTimeout(() => toast.remove(), 250);
-    }, 2800);
-}
-
-// ==========================================
-// Cloud REST API & RLS Playground
-// ==========================================
-let aclUsersCache = [];
-
-function initCloudApiPlayground() {
-    const endpointSelect = document.getElementById('apiEndpointSelect');
-    const tokenSelect = document.getElementById('apiTokenSelect');
-    const customTokenInput = document.getElementById('apiCustomTokenInput');
-    const customTokenGroup = document.getElementById('apiCustomTokenGroup');
-    const targetKeyInput = document.getElementById('apiTargetKey');
-    const keyInputGroup = document.getElementById('apiKeyInputGroup');
-    const requestBodyArea = document.getElementById('apiRequestBody');
-    const bodyGroup = document.getElementById('apiBodyGroup');
-    const executeBtn = document.getElementById('apiExecuteBtn');
-    const refreshAclBtn = document.getElementById('refreshAclBtn');
-    const copyCurlBtn = document.getElementById('copyCurlBtn');
-
-    if (!endpointSelect) return;
-
-    tokenSelect.addEventListener('change', () => {
-        if (tokenSelect.value === 'custom') {
-            customTokenGroup.style.display = 'flex';
-        } else {
-            customTokenGroup.style.display = 'none';
-        }
-        updateCurlSnippet();
-    });
-
-    if (customTokenInput) customTokenInput.addEventListener('input', updateCurlSnippet);
-    if (targetKeyInput) targetKeyInput.addEventListener('input', updateCurlSnippet);
-    if (requestBodyArea) requestBodyArea.addEventListener('input', updateCurlSnippet);
-
-    endpointSelect.addEventListener('change', () => {
-        const ep = endpointSelect.value;
-        switch (ep) {
-            case 'GET_KEY':
-                keyInputGroup.style.display = 'flex';
-                bodyGroup.style.display = 'none';
-                break;
-            case 'SET_KEY':
-                keyInputGroup.style.display = 'none';
-                bodyGroup.style.display = 'flex';
-                requestBodyArea.value = JSON.stringify({
-                    key: targetKeyInput.value || "app:user:101",
-                    value: "{\"name\": \"Alice\", \"role\": \"developer\"}",
-                    ttl: 3600
-                }, null, 2);
-                break;
-            case 'LPUSH':
-                keyInputGroup.style.display = 'none';
-                bodyGroup.style.display = 'flex';
-                requestBodyArea.value = JSON.stringify({
-                    key: targetKeyInput.value || "app:queue:tasks",
-                    values: ["task_build_image", "task_run_tests"]
-                }, null, 2);
-                break;
-            case 'LRANGE':
-                keyInputGroup.style.display = 'flex';
-                bodyGroup.style.display = 'none';
-                break;
-            case 'HSET':
-                keyInputGroup.style.display = 'none';
-                bodyGroup.style.display = 'flex';
-                requestBodyArea.value = JSON.stringify({
-                    key: targetKeyInput.value || "app:settings:theme",
-                    fields: { "mode": "dark", "fontSize": "14px" }
-                }, null, 2);
-                break;
-            case 'HGETALL':
-                keyInputGroup.style.display = 'flex';
-                bodyGroup.style.display = 'none';
-                break;
-            case 'DEL_KEY':
-                keyInputGroup.style.display = 'flex';
-                bodyGroup.style.display = 'none';
-                break;
-            case 'PIPELINE':
-                keyInputGroup.style.display = 'none';
-                bodyGroup.style.display = 'flex';
-                requestBodyArea.value = JSON.stringify({
-                    commands: [
-                        ["SET", "app:counter", "100"],
-                        ["INCR", "app:counter"],
-                        ["GET", "app:counter"]
-                    ]
-                }, null, 2);
-                break;
-            case 'RAW_CMD':
-                keyInputGroup.style.display = 'none';
-                bodyGroup.style.display = 'flex';
-                requestBodyArea.value = JSON.stringify({
-                    command: "SET",
-                    args: ["app:test:key", "Hello Cloud!"]
-                }, null, 2);
-                break;
-        }
-        updateCurlSnippet();
-    });
-
-    if (executeBtn) executeBtn.addEventListener('click', executeApiRequest);
-    if (refreshAclBtn) refreshAclBtn.addEventListener('click', loadAclUsers);
-    if (copyCurlBtn) {
-        copyCurlBtn.addEventListener('click', () => {
-            const text = document.getElementById('apiCurlSnippet').textContent;
-            navigator.clipboard.writeText(text).then(() => showToast('Copied cURL command!'));
-        });
-    }
-
-    updateCurlSnippet();
-}
-
-function getSelectedApiToken() {
-    const sel = document.getElementById('apiTokenSelect').value;
-    if (sel === 'custom') {
-        return document.getElementById('apiCustomTokenInput').value.trim() || 'custom_token';
-    }
-    return sel;
-}
-
-function updateCurlSnippet() {
-    const ep = document.getElementById('apiEndpointSelect')?.value || 'GET_KEY';
-    const token = getSelectedApiToken();
-    const key = document.getElementById('apiTargetKey')?.value.trim() || 'app:user:101';
-    const body = document.getElementById('apiRequestBody')?.value.trim() || '';
-    const curlSnippet = document.getElementById('apiCurlSnippet');
-    if (!curlSnippet) return;
-
-    const origin = window.location.origin;
-
-    switch (ep) {
-        case 'GET_KEY':
-            curlSnippet.textContent = `curl -H "Authorization: Bearer ${token}" ${origin}/v1/get/${encodeURIComponent(key)}`;
-            break;
-        case 'SET_KEY':
-            curlSnippet.textContent = `curl -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '${body.replace(/\n\s*/g, ' ')}' ${origin}/v1/set`;
-            break;
-        case 'LPUSH':
-            curlSnippet.textContent = `curl -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '${body.replace(/\n\s*/g, ' ')}' ${origin}/v1/lpush`;
-            break;
-        case 'LRANGE':
-            curlSnippet.textContent = `curl -H "Authorization: Bearer ${token}" "${origin}/v1/lrange/${encodeURIComponent(key)}?start=0&stop=-1"`;
-            break;
-        case 'HSET':
-            curlSnippet.textContent = `curl -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '${body.replace(/\n\s*/g, ' ')}' ${origin}/v1/hset`;
-            break;
-        case 'HGETALL':
-            curlSnippet.textContent = `curl -H "Authorization: Bearer ${token}" ${origin}/v1/hgetall/${encodeURIComponent(key)}`;
-            break;
-        case 'DEL_KEY':
-            curlSnippet.textContent = `curl -X DELETE -H "Authorization: Bearer ${token}" ${origin}/v1/del/${encodeURIComponent(key)}`;
-            break;
-        case 'PIPELINE':
-            curlSnippet.textContent = `curl -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '${body.replace(/\n\s*/g, ' ')}' ${origin}/v1/pipeline`;
-            break;
-        case 'RAW_CMD':
-            curlSnippet.textContent = `curl -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '${body.replace(/\n\s*/g, ' ')}' ${origin}/v1/command`;
-            break;
-    }
-}
-
-async function executeApiRequest() {
-    const ep = document.getElementById('apiEndpointSelect').value;
-    const token = getSelectedApiToken();
-    const key = document.getElementById('apiTargetKey').value.trim() || 'app:user:101';
-    const bodyStr = document.getElementById('apiRequestBody').value.trim();
-    const statusEl = document.getElementById('apiResponseStatus');
-    const boxEl = document.getElementById('apiResponseBox');
-    const execBtn = document.getElementById('apiExecuteBtn');
-
-    execBtn.disabled = true;
-    statusEl.innerHTML = '<span style="color: var(--text-muted);">Executing...</span>';
-    boxEl.textContent = 'Awaiting response...';
-
-    let url = '/v1/';
-    let method = 'GET';
-    let headers = {
-        'Authorization': `Bearer ${token}`
-    };
-    let payload = null;
-
-    switch (ep) {
-        case 'GET_KEY':
-            url = `/v1/get/${encodeURIComponent(key)}`;
-            method = 'GET';
-            break;
-        case 'SET_KEY':
-            url = '/v1/set';
-            method = 'POST';
-            headers['Content-Type'] = 'application/json';
-            payload = bodyStr;
-            break;
-        case 'LPUSH':
-            url = '/v1/lpush';
-            method = 'POST';
-            headers['Content-Type'] = 'application/json';
-            payload = bodyStr;
-            break;
-        case 'LRANGE':
-            url = `/v1/lrange/${encodeURIComponent(key)}?start=0&stop=-1`;
-            method = 'GET';
-            break;
-        case 'HSET':
-            url = '/v1/hset';
-            method = 'POST';
-            headers['Content-Type'] = 'application/json';
-            payload = bodyStr;
-            break;
-        case 'HGETALL':
-            url = `/v1/hgetall/${encodeURIComponent(key)}`;
-            method = 'GET';
-            break;
-        case 'DEL_KEY':
-            url = `/v1/del/${encodeURIComponent(key)}`;
-            method = 'DELETE';
-            break;
-        case 'PIPELINE':
-            url = '/v1/pipeline';
-            method = 'POST';
-            headers['Content-Type'] = 'application/json';
-            payload = bodyStr;
-            break;
-        case 'RAW_CMD':
-            url = '/v1/command';
-            method = 'POST';
-            headers['Content-Type'] = 'application/json';
-            payload = bodyStr;
-            break;
-    }
-
-    const t0 = performance.now();
-    try {
-        const resp = await fetch(url, {
-            method: method,
-            headers: headers,
-            body: payload
-        });
-        const elapsed = (performance.now() - t0).toFixed(1);
-        const data = await resp.json().catch(() => ({ raw: 'Non-JSON response' }));
-
-        const isSuccess = resp.ok;
-        statusEl.innerHTML = `<span style="color: ${isSuccess ? '#34d399' : '#ff4757'};">${resp.status} ${resp.statusText} (${elapsed} ms)</span>`;
-        boxEl.textContent = JSON.stringify(data, null, 2);
-
-        if (isSuccess && ['SET_KEY', 'LPUSH', 'HSET', 'DEL_KEY', 'PIPELINE', 'RAW_CMD'].includes(ep)) {
-            fetchKeys();
-            fetchStats();
-        }
-    } catch (e) {
-        statusEl.innerHTML = `<span style="color: #ff4757;">Network Error</span>`;
-        boxEl.textContent = `Error: ${e.message}`;
-    } finally {
-        execBtn.disabled = false;
-    }
-}
-
-async function loadAclUsers() {
-    const container = document.getElementById('aclUserListContainer');
-    if (!container) return;
-
-    try {
-        const res = await fetch('/api/acl');
-        if (!res.ok) throw new Error('Failed to load ACL accounts');
-        const data = await res.json();
-        aclUsersCache = data.users || [];
-
-        if (aclUsersCache.length === 0) {
-            container.innerHTML = '<div class="empty">No ACL users registered</div>';
-            return;
-        }
-
-        container.innerHTML = aclUsersCache.map(u => {
-            const patterns = (u.keyPatterns || []).map(p => `<span class="pattern-tag">${escapeHtml(p)}</span>`).join('');
-            return `
-                <div class="user-card-item">
-                    <div class="user-card-head">
-                        <div class="user-name-group">
-                            <iconify-icon icon="lucide:user-check" width="16" style="color: #38bdf8;"></iconify-icon>
-                            <span>${escapeHtml(u.username)}</span>
-                        </div>
-                        <span class="role-badge ${u.role}">${escapeHtml(u.role)}</span>
-                    </div>
-
-                    <div class="token-row">
-                        <span class="token-text" title="${escapeHtml(u.apiToken)}">${escapeHtml(u.apiToken)}</span>
-                        <button class="btn-icon-copy" onclick="copyUserToken('${escapeHtml(u.apiToken)}')" title="Copy token">
-                            <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
-                        </button>
-                    </div>
-
-                    <div class="patterns-row">
-                        <span class="pattern-lbl">Allowed RLS Keys:</span>
-                        ${patterns || '<span class="pattern-tag">*</span>'}
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-    } catch (e) {
-        container.innerHTML = `<div class="error" style="color: #ff4757; font-size: 0.8rem;">Error loading users: ${escapeHtml(e.message)}</div>`;
-    }
-}
-
-function copyUserToken(tok) {
-    navigator.clipboard.writeText(tok).then(() => showToast('Copied token to clipboard!'));
-}
-
-// ==========================================
-// Virtual Thread Benchmark Runner
-// ==========================================
-function initBenchmarkEngine() {
-    const startBtn = document.getElementById('startBenchmarkBtn');
-    if (!startBtn) return;
-
-    startBtn.addEventListener('click', runBenchmarkTest);
-}
-
-async function runBenchmarkTest() {
-    const totalOps = parseInt(document.getElementById('benchOpsSelect').value, 10) || 25000;
-    const concurrency = parseInt(document.getElementById('benchConcurrencySelect').value, 10) || 50;
-    const startBtn = document.getElementById('startBenchmarkBtn');
-
-    startBtn.disabled = true;
-    startBtn.innerHTML = '<div class="studio-spinner" style="width: 14px; height: 14px; border-width: 2px;"></div> Running stress test...';
-
-    showToast(`Starting benchmark with ${totalOps.toLocaleString()} ops across ${concurrency} virtual threads...`);
-
-    try {
-        const res = await fetch('/api/benchmark', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                totalOperations: totalOps,
-                concurrency: concurrency
-            })
-        });
-
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Benchmark failed');
-        }
-
-        const bench = await res.json();
-        const ops = bench.opsPerSec ?? bench.operationsPerSecond ?? 0;
-        const p50 = bench.p50Millis ?? bench.p50LatencyMs ?? 0;
-        const p90 = bench.p90Millis ?? bench.p90LatencyMs ?? 0;
-        const p99 = bench.p99Millis ?? bench.p99LatencyMs ?? 0;
-        const min = bench.minMillis ?? bench.minLatencyMs ?? 0;
-        const max = bench.maxMillis ?? bench.maxLatencyMs ?? 0;
-
-        // Update hero metrics
-        document.getElementById('benchOpsPerSec').textContent = Math.round(ops).toLocaleString();
-        document.getElementById('benchDuration').textContent = `${bench.durationMillis} ms`;
-        document.getElementById('benchCompletedOps').textContent = (bench.totalOperations || 0).toLocaleString();
-        document.getElementById('benchConcurrencyLabel').textContent = `${bench.concurrency} Virtual Threads`;
-
-        // Update latency metrics
-        document.getElementById('benchP50').textContent = `${p50.toFixed(3)} ms`;
-        document.getElementById('benchP90').textContent = `${p90.toFixed(3)} ms`;
-        document.getElementById('benchP99').textContent = `${p99.toFixed(3)} ms`;
-        document.getElementById('benchMin').textContent = `${min.toFixed(3)} ms`;
-        document.getElementById('benchMax').textContent = `${max.toFixed(3)} ms`;
-
-        showToast(`⚡ Stress test finished: ${Math.round(ops).toLocaleString()} ops/sec!`);
-        fetchKeys();
-        fetchStats();
-
-    } catch (e) {
-        showToast('Benchmark error: ' + e.message, true);
-    } finally {
-        startBtn.disabled = false;
-        startBtn.innerHTML = '<iconify-icon icon="lucide:zap" width="16"></iconify-icon> Start Stress Test';
-    }
-}
-
-// ==========================================
-// Virtual Database Selector (Multi-Tenant Isolation)
+// Virtual Database Engine & Hub
 // ==========================================
 function initVirtualDatabaseSelector() {
-    const sel = document.getElementById('vdbSelect');
-    if (!sel) return;
-
-    sel.addEventListener('change', (e) => {
-        switchVirtualDatabase(e.target.value);
-    });
+    const select = document.getElementById('vdbSelect');
+    if (select) {
+        select.addEventListener('change', (e) => {
+            switchVirtualDatabase(e.target.value);
+        });
+    }
 }
 
 function switchVirtualDatabase(dbName) {
-    activeVirtualDb = dbName || 'default';
-    const displayDb = activeVirtualDb === 'default' ? 'db0' : activeVirtualDb;
+    activeVirtualDb = dbName;
+    document.querySelectorAll('.vdbSelect').forEach(s => s.value = dbName);
 
-    const allDbs = [...(userDatabases.myDatabases || []), ...(userDatabases.sharedWithMe || [])];
-    const found = allDbs.find(d => d.id === activeVirtualDb || d.name === activeVirtualDb);
-    activeDbInstance = found || null;
-    activeDatabaseRole = found ? (found.userRole || 'OWNER') : 'OWNER';
+    // Update active role badge
+    let role = 'OWNER';
+    if (activeVirtualDb !== 'default') {
+        const foundMy = userDatabases.myDatabases.find(d => d.id === dbName);
+        if (foundMy) role = 'OWNER';
+        else {
+            const foundShared = userDatabases.sharedWithMe.find(d => d.id === dbName);
+            if (foundShared) role = foundShared.role || 'VIEWER';
+        }
+    }
+    activeDatabaseRole = role;
 
-    // Update Top bar role badge
-    const roleBadge = document.getElementById('activeDbRoleBadge');
-    if (roleBadge) {
-        roleBadge.textContent = activeDatabaseRole;
-        roleBadge.className = `db-role-badge-pill ${activeDatabaseRole}`;
-        roleBadge.style.display = 'inline-block';
-    }
-
-    // Role-based UI restriction: VIEWER is read-only
-    const isViewer = (activeDatabaseRole === 'VIEWER');
-    const insertBtn = document.getElementById('openInsertModalBtn');
-    if (insertBtn) {
-        insertBtn.disabled = isViewer;
-        insertBtn.title = isViewer ? "Insert disabled (Viewer role)" : "Insert Record";
-    }
-    const flushBtn = document.getElementById('flushDbBtn');
-    if (flushBtn) {
-        flushBtn.style.display = isViewer ? 'none' : 'flex';
-    }
-    const importBtn = document.getElementById('importDataBtn');
-    if (importBtn) {
-        importBtn.disabled = isViewer;
-    }
-    const batchDelBtn = document.getElementById('batchDeleteBtn');
-    if (batchDelBtn) {
-        batchDelBtn.disabled = isViewer;
-    }
-    const inspDelBtn = document.getElementById('inspDeleteRecordBtn');
-    if (inspDelBtn) {
-        inspDelBtn.disabled = isViewer;
-    }
-    const inspSaveBtn = document.getElementById('inspSaveRecordBtn');
-    if (inspSaveBtn) {
-        inspSaveBtn.disabled = isViewer;
+    const badge = document.getElementById('activeDbRoleBadge');
+    if (badge) {
+        badge.textContent = role;
+        badge.className = role === 'OWNER' ? 'px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-700' : 'px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700';
     }
 
-    const pill = document.getElementById('sbActiveDbPill');
-    if (pill) pill.textContent = found ? found.name : displayDb;
-
-    const sel = document.getElementById('vdbSelect');
-    if (sel && sel.value !== activeVirtualDb) {
-        sel.value = activeVirtualDb;
-    }
-
-    const statActive = document.getElementById('statActiveDbName');
-    if (statActive) {
-        statActive.textContent = found ? found.name : displayDb;
-    }
-    const statActiveRole = document.getElementById('statActiveDbRoleSub');
-    if (statActiveRole) {
-        statActiveRole.textContent = `Role: ${activeDatabaseRole}`;
-    }
+    const ovLbl = document.getElementById('ovCurrentDbLabel');
+    if (ovLbl) ovLbl.textContent = dbName === 'default' ? 'db0' : dbName;
 
     currentPage = 1;
     selectedKeys.clear();
     updateBatchBar();
     fetchKeys();
     fetchStats();
-    showToast(`Active database: ${found ? found.name : displayDb} (${activeDatabaseRole})`);
+    showToast(`Switched active keyspace to [${dbName}]`);
 }
 
-function updateVirtualDatabaseSelector(myDbs = [], sharedDbs = []) {
-    const sel = document.getElementById('vdbSelect');
-    if (!sel) return;
-
-    let optionsHtml = '';
-    if (myDbs.length > 0) {
-        optionsHtml += `<optgroup label="My Databases">`;
-        myDbs.forEach(db => {
-            optionsHtml += `<option value="${escapeHtml(db.id)}">${escapeHtml(db.name)} (${db.keyCount || 0} keys)</option>`;
-        });
-        optionsHtml += `</optgroup>`;
-    }
-    if (sharedDbs.length > 0) {
-        optionsHtml += `<optgroup label="Shared With Me">`;
-        sharedDbs.forEach(db => {
-            optionsHtml += `<option value="${escapeHtml(db.id)}">${escapeHtml(db.name)} (${db.userRole})</option>`;
-        });
-        optionsHtml += `</optgroup>`;
-    }
-    if (!myDbs.length && !sharedDbs.length) {
-        optionsHtml = `<option value="default">db0 (Default Root)</option>`;
-    }
-
-    sel.innerHTML = optionsHtml;
-    const all = [...myDbs, ...sharedDbs];
-    if (all.some(d => d.id === activeVirtualDb)) {
-        sel.value = activeVirtualDb;
-    } else if (all.length > 0) {
-        activeVirtualDb = all[0].id;
-        sel.value = activeVirtualDb;
-    }
-}
-
-// ==========================================
-// Accounts & Virtual DBs Studio Panel
-// ==========================================
-function initTenantsPanel() {
-    const toggleFormBtn = document.getElementById('toggleCreateTenantFormBtn');
-    const formCard = document.getElementById('tenantCreationCard');
-    const closeFormBtn = document.getElementById('closeTenantFormBtn');
-    const cancelFormBtn = document.getElementById('cancelTenantFormBtn');
-    const createForm = document.getElementById('createTenantForm');
-    const refreshBtn = document.getElementById('refreshTenantsBtn');
-    const usernameInput = document.getElementById('tenantUsernameInput');
-    const previewSpan = document.getElementById('vdbPreviewName');
-
-    if (toggleFormBtn && formCard) {
-        toggleFormBtn.addEventListener('click', () => {
-            formCard.style.display = formCard.style.display === 'none' ? 'block' : 'none';
-            if (formCard.style.display === 'block') {
-                usernameInput.focus();
-            }
-        });
-    }
-
-    if (closeFormBtn && formCard) {
-        closeFormBtn.addEventListener('click', () => formCard.style.display = 'none');
-    }
-    if (cancelFormBtn && formCard) {
-        cancelFormBtn.addEventListener('click', () => formCard.style.display = 'none');
-    }
-
-    if (usernameInput && previewSpan) {
-        usernameInput.addEventListener('input', () => {
-            const u = usernameInput.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-            previewSpan.textContent = u ? `vdb_${u}` : 'vdb_...';
-        });
-    }
-
-    if (createForm) {
-        createForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const submitBtn = document.getElementById('submitTenantFormBtn');
-            const username = usernameInput.value.trim();
-            const password = document.getElementById('tenantPasswordInput').value.trim();
-            const token = document.getElementById('tenantTokenInput').value.trim();
-
-            if (!username) {
-                showToast('Username is required', true);
-                return;
-            }
-
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<div class="studio-spinner" style="width: 14px; height: 14px; border-width: 2px;"></div> Provisioning...';
-
-            try {
-                const res = await fetch('/api/tenants', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password, token })
-                });
-                const data = await res.json();
-                if (!res.ok || !data.success) {
-                    throw new Error(data.error || 'Failed to create tenant');
-                }
-
-                showToast(`Provisioned account "${username}" with virtual database!`);
-                formCard.style.display = 'none';
-                createForm.reset();
-                if (previewSpan) previewSpan.textContent = 'vdb_...';
-
-                await loadTenants();
-                await fetchStats();
-
-                // Open Connect modal pre-selected for this new user!
-                openConnectModal(username);
-            } catch (err) {
-                showToast(err.message, true);
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '<iconify-icon icon="lucide:plus" width="14"></iconify-icon> Provision Account & Virtual Database';
-            }
-        });
-    }
-
-    if (refreshBtn) {
-        refreshBtn.addEventListener('click', () => {
-            loadTenants();
-            showToast('Tenants list updated');
-        });
-    }
-}
-
-async function loadTenants() {
-    const container = document.getElementById('tenantsCardsContainer');
-    if (!container) return;
-
-    try {
-        const res = await fetch('/api/tenants');
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
-        tenantsCache = data.tenants || [];
-        databasesCache = data.databases || [];
-
-        // Update stats
-        const badge = document.getElementById('tenantCountBadge');
-        if (badge) badge.textContent = tenantsCache.length;
-        const statTenant = document.getElementById('statTenantCount');
-        if (statTenant) statTenant.textContent = tenantsCache.length;
-        const statVdb = document.getElementById('statVdbCount');
-        if (statVdb) statVdb.textContent = databasesCache.length;
-
-        updateVirtualDatabaseSelector(databasesCache, activeVirtualDb);
-
-        if (tenantsCache.length === 0) {
-            container.innerHTML = `<div class="empty-state">No tenant accounts found. Click "New Tenant Account" to provision your first virtual database.</div>`;
-            return;
-        }
-
-        container.innerHTML = tenantsCache.map(u => {
-            const urls = u.connectionUrls || {};
-            const isCurrentActive = (activeVirtualDb === u.virtualDb) || (u.username === 'admin' && activeVirtualDb === 'default');
-            const initial = (u.username[0] || 'U').toUpperCase();
-
-            return `
-                <div class="tenant-card ${isCurrentActive ? 'active-db' : ''}" data-username="${escapeHtml(u.username)}">
-                    <div class="tenant-card-head">
-                        <div class="tenant-user-info">
-                            <div class="tenant-avatar">${initial}</div>
-                            <div class="tenant-name-wrap">
-                                <span class="tenant-name">
-                                    ${escapeHtml(u.username)}
-                                    ${isCurrentActive ? '<span class="badge-type" style="background:#2563eb; color:#fff; font-size:0.65rem;">Active in Studio</span>' : ''}
-                                </span>
-                                <span class="tenant-db-tag">${escapeHtml(u.virtualDb || 'db0')}</span>
-                            </div>
-                        </div>
-                        <div class="tenant-badges-row">
-                            <span class="role-badge ${u.role}">${escapeHtml(u.role)}</span>
-                        </div>
-                    </div>
-
-                    <div class="tenant-stats-row">
-                        <div class="tenant-stat-col">
-                            <span class="lbl">Keys Count</span>
-                            <span class="val">${(u.keyCount || 0).toLocaleString()}</span>
-                        </div>
-                        <div class="tenant-stat-col">
-                            <span class="lbl">Memory Allocated</span>
-                            <span class="val">${escapeHtml(u.memoryHuman || '0 B')}</span>
-                        </div>
-                        <div class="tenant-stat-col">
-                            <span class="lbl">RLS Scope</span>
-                            <span class="val" style="color: #34d399;">${(u.keyPatterns && u.keyPatterns[0]) || '*'}</span>
-                        </div>
-                    </div>
-
-                    <div class="tenant-url-block">
-                        <div class="url-copy-field">
-                            <span class="prefix">Redis URL</span>
-                            <code title="${escapeHtml(urls.redisUrl || '')}">${escapeHtml(urls.redisUrl || '')}</code>
-                            <button class="btn-icon-copy" onclick="copyToClipboard('${escapeHtml(urls.redisUrl || '')}', 'Copied Redis URL!')" title="Copy Redis URL">
-                                <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
-                            </button>
-                        </div>
-                        <div class="url-copy-field">
-                            <span class="prefix">API Token</span>
-                            <code title="${escapeHtml(u.apiToken || '')}">${escapeHtml(u.apiToken || '')}</code>
-                            <button class="btn-icon-copy" onclick="copyToClipboard('${escapeHtml(u.apiToken || '')}', 'Copied API Token!')" title="Copy Token">
-                                <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="tenant-card-actions">
-                        <button class="btn btn-secondary btn-sm" onclick="openConnectModal('${escapeHtml(u.username)}')">
-                            <iconify-icon icon="lucide:link-2" width="13"></iconify-icon>
-                            Connect Snippets
-                        </button>
-                        <button class="btn ${isCurrentActive ? 'btn-secondary' : 'btn-primary'} btn-sm" onclick="switchVirtualDatabase('${escapeHtml(u.virtualDb || 'default')}')">
-                            <iconify-icon icon="lucide:database" width="13"></iconify-icon>
-                            ${isCurrentActive ? 'Currently Browsing' : 'Switch Studio DB'}
-                        </button>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-    } catch (e) {
-        container.innerHTML = `<div style="color: #ff4757; font-size: 0.85rem;">Failed to load accounts: ${escapeHtml(e.message)}</div>`;
-    }
-}
-
-// ==========================================
-// Connect to Redis Modal (Prisma, ioredis, CLI, REST)
-// ==========================================
-function initConnectModal() {
-    const modal = document.getElementById('connectModal');
-    const openBtn = document.getElementById('openConnectModalBtn');
-    const closeBtn1 = document.getElementById('closeConnectModalBtn');
-    const closeBtn2 = document.getElementById('closeConnectModalBtn2');
-    const tenantSelect = document.getElementById('connectAccountSelect');
-    const tabs = document.querySelectorAll('.connect-tab');
-    const copySnippetBtn = document.getElementById('copySnippetBtn');
-    const copyRedisUrlBtn = document.getElementById('copyConnRedisUrlBtn');
-    const copyTokenUrlBtn = document.getElementById('copyConnTokenUrlBtn');
-
-    if (openBtn) {
-        openBtn.addEventListener('click', () => openConnectModal());
-    }
-    if (closeBtn1) closeBtn1.addEventListener('click', closeConnectModal);
-    if (closeBtn2) closeBtn2.addEventListener('click', closeConnectModal);
-
-    if (tenantSelect) {
-        tenantSelect.addEventListener('change', (e) => {
-            activeConnectTenantUsername = e.target.value;
-            renderConnectDetails();
-        });
-    }
-
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            activeConnectTab = tab.dataset.tab;
-            renderConnectSnippet();
-        });
-    });
-
-    if (copySnippetBtn) {
-        copySnippetBtn.addEventListener('click', () => {
-            const code = document.getElementById('connectSnippetCode').textContent;
-            copyToClipboard(code, 'Copied code snippet!');
-        });
-    }
-
-    if (copyRedisUrlBtn) {
-        copyRedisUrlBtn.addEventListener('click', () => {
-            const url = document.getElementById('connRedisUrlInput').value;
-            copyToClipboard(url, 'Copied Redis URL!');
-        });
-    }
-
-    if (copyTokenUrlBtn) {
-        copyTokenUrlBtn.addEventListener('click', () => {
-            const url = document.getElementById('connTokenUrlInput').value;
-            copyToClipboard(url, 'Copied Token URL!');
-        });
-    }
-}
-
-async function openConnectModal(preferredUsername) {
-    const modal = document.getElementById('connectModal');
-    if (!modal) return;
-
-    if (tenantsCache.length === 0) {
-        try {
-            const res = await fetch('/api/tenants');
-            if (res.ok) {
-                const data = await res.json();
-                tenantsCache = data.tenants || [];
-            }
-        } catch (ignored) {}
-    }
-
-    const select = document.getElementById('connectAccountSelect');
-    if (select && tenantsCache.length > 0) {
-        select.innerHTML = tenantsCache.map(u => `
-            <option value="${escapeHtml(u.username)}">${escapeHtml(u.username)} (${escapeHtml(u.virtualDb || 'db0')}) - ${escapeHtml(u.role)}</option>
-        `).join('');
-
-        if (preferredUsername && tenantsCache.some(u => u.username === preferredUsername)) {
-            activeConnectTenantUsername = preferredUsername;
-            select.value = preferredUsername;
-        } else if (activeVirtualDb && activeVirtualDb !== 'default') {
-            const match = tenantsCache.find(u => u.virtualDb === activeVirtualDb);
-            if (match) {
-                activeConnectTenantUsername = match.username;
-                select.value = match.username;
-            } else {
-                activeConnectTenantUsername = tenantsCache[0].username;
-                select.value = activeConnectTenantUsername;
-            }
-        } else {
-            activeConnectTenantUsername = select.value || 'admin';
-        }
-    }
-
-    renderConnectDetails();
-    modal.classList.add('open');
-}
-
-function closeConnectModal() {
-    const modal = document.getElementById('connectModal');
-    if (modal) modal.classList.remove('open');
-}
-
-function renderConnectDetails() {
-    const user = tenantsCache.find(u => u.username === activeConnectTenantUsername) || (tenantsCache[0] || {
-        username: 'admin',
-        password: 'redis_admin_secret',
-        apiToken: 'tok_admin_live_secret',
-        virtualDb: 'db0',
-        connectionUrls: {
-            redisUrl: 'redis://admin:redis_admin_secret@localhost:6379',
-            tokenUrl: 'redis://:tok_admin_live_secret@localhost:6379',
-            restUrl: 'http://localhost:8080/v1'
-        }
-    });
-
-    const host = window.location.hostname || 'localhost';
-    const redisPort = 6379;
-    const webPort = window.location.port || 8080;
-    const stdUrl = `redis://${user.username}:${user.password}@${host}:${redisPort}`;
-    const tokUrl = `redis://:${user.apiToken}@${host}:${redisPort}`;
-
-    const redisInput = document.getElementById('connRedisUrlInput');
-    const tokenInput = document.getElementById('connTokenUrlInput');
-    if (redisInput) redisInput.value = stdUrl;
-    if (tokenInput) tokenInput.value = tokUrl;
-
-    renderConnectSnippet(user, stdUrl, tokUrl, host, redisPort, webPort);
-}
-
-function renderConnectSnippet(user, stdUrl, tokUrl, host, redisPort, webPort) {
-    if (!user) {
-        user = tenantsCache.find(u => u.username === activeConnectTenantUsername) || {};
-    }
-    if (!stdUrl) {
-        const h = window.location.hostname || 'localhost';
-        stdUrl = `redis://${user.username || 'admin'}:${user.password || 'password'}@${h}:6379`;
-        tokUrl = `redis://:${user.apiToken || 'token'}@${h}:6379`;
-        host = h;
-        redisPort = 6379;
-        webPort = window.location.port || 8080;
-    }
-
-    const titleEl = document.getElementById('snippetLanguageTitle');
-    const codeEl = document.getElementById('connectSnippetCode');
-    if (!codeEl) return;
-
-    let code = '';
-    let title = '';
-
-    switch (activeConnectTab) {
-        case 'prisma':
-            title = 'schema.prisma & .env Integration';
-            code = `// 1. In your .env file:
-DATABASE_URL="${stdUrl}"
-
-// 2. In your schema.prisma file:
-datasource db {
-  provider = "redis"
-  url      = env("DATABASE_URL")
-}
-
-// In your application code:
-import { PrismaClient } from '@prisma/client'
-const prisma = new PrismaClient()
-
-// Direct Redis caching / session commands run inside isolated database: ${user.virtualDb || 'vdb_' + user.username}`;
-            break;
-
-        case 'ioredis':
-            title = 'Node.js (ioredis / Express / BullMQ)';
-            code = `import Redis from 'ioredis';
-
-// Connect using standard URL with auto-auth and tenant isolation:
-const redis = new Redis("${stdUrl}");
-
-// Or connect using Single-Token URL:
-// const redis = new Redis("${tokUrl}");
-
-await redis.set("user:session:token", "jwt_active_session_456", "EX", 3600);
-const session = await redis.get("user:session:token");
-console.log("Cached Session:", session);
-
-// Disconnect on app shutdown
-// await redis.quit();`;
-            break;
-
-        case 'python':
-            title = 'Python (redis-py / FastAPI / Django)';
-            code = `import redis
-
-# Connect to isolated virtual database (${user.virtualDb || 'vdb_' + user.username})
-r = redis.from_url("${stdUrl}")
-
-# Test connection & write key
-r.set("python:demo:key", "Hello from Python Redis Client", ex=600)
-val = r.get("python:demo:key")
-print("Retrieved:", val.decode("utf-8"))
-
-# Hash operations
-r.hset("user:101", mapping={"name": "Alice", "role": "engineer"})
-print("Hash Data:", r.hgetall("user:101"))`;
-            break;
-
-        case 'cli':
-            title = 'Official Redis CLI';
-            code = `# 1. Connect directly using connection URL
-redis-cli -u ${stdUrl}
-
-# 2. Or connect and authenticate manually:
-redis-cli -h ${host} -p ${redisPort} -a ${user.password || user.apiToken}
-
-# Verify isolated database:
-127.0.0.1:6379> PING
-PONG
-127.0.0.1:6379> SET status "online"
-OK`;
-            break;
-
-        case 'rest':
-            title = 'Serverless Cloud Edge REST API (Upstash KV format)';
-            code = `// .env.local
-UPSTASH_REDIS_REST_URL="http://${host}:${webPort}/v1"
-UPSTASH_REDIS_REST_TOKEN="${user.apiToken || 'red_api_...'}"
-
-// cURL test:
-curl -X POST http://${host}:${webPort}/v1/set \\
-  -H "Authorization: Bearer ${user.apiToken || 'red_api_...'}" \\
-  -H "Content-Type: application/json" \\
-  -d '{"key": "cloud:item", "value": "Stored over HTTP REST at the Edge"}'
-
-// cURL get:
-curl http://${host}:${webPort}/v1/get/cloud%3Aitem \\
-  -H "Authorization: Bearer ${user.apiToken || 'red_api_...'}"`;
-            break;
-    }
-
-    if (titleEl) titleEl.textContent = title;
-    codeEl.textContent = code;
-}
-
-function copyToClipboard(text, successMsg = 'Copied to clipboard!') {
-    if (!text) return;
-    navigator.clipboard.writeText(text).then(() => {
-        showToast(successMsg);
-    }).catch(() => {
-        // Fallback
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        showToast(successMsg);
-    });
-}
-
-// ==========================================
-// Authentication Engine (Google, Email, Demo Switcher)
-// ==========================================
-function initAuth() {
-    // 1. Intercept fetch to automatically attach currentSessionToken
-    const _rawFetch = window.fetch;
-    window.fetch = function(input, init) {
-        init = init || {};
-        init.headers = init.headers || {};
-        const tok = currentSessionToken || localStorage.getItem('redis_studio_session');
-        if (tok) {
-            if (init.headers instanceof Headers) {
-                if (!init.headers.has('Authorization')) {
-                    init.headers.append('Authorization', `Bearer ${tok}`);
-                }
-            } else if (Array.isArray(init.headers)) {
-                init.headers.push(['Authorization', `Bearer ${tok}`]);
-            } else {
-                if (!init.headers['Authorization']) {
-                    init.headers['Authorization'] = `Bearer ${tok}`;
-                }
-            }
-        }
-        return _rawFetch(input, init);
-    };
-
-    // Google Sign-In button
-    const googleBtn = document.getElementById('googleSignInBtn');
-    if (googleBtn) {
-        googleBtn.addEventListener('click', async () => {
-            const email = prompt("Enter Google account email to sign in:", "alex@rediscloud.dev");
-            if (!email) return;
-            const name = email.split('@')[0];
-            await loginWithGoogle(email, name);
-        });
-    }
-
-    // Demo Accounts buttons
-    const demoAlexBtn = document.getElementById('demoUserAlexBtn');
-    if (demoAlexBtn) {
-        demoAlexBtn.addEventListener('click', async () => {
-            await loginWithEmail("alex@rediscloud.dev", "redis123");
-        });
-    }
-
-    const demoSarahBtn = document.getElementById('demoUserSarahBtn');
-    if (demoSarahBtn) {
-        demoSarahBtn.addEventListener('click', async () => {
-            await loginWithEmail("sarah@company.io", "redis123");
-        });
-    }
-
-    // Tabs for Login / Register
-    const tabLogin = document.getElementById('authTabLogin');
-    const tabRegister = document.getElementById('authTabRegister');
-    const formLogin = document.getElementById('authLoginForm');
-    const formRegister = document.getElementById('authRegisterForm');
-
-    if (tabLogin && tabRegister && formLogin && formRegister) {
-        tabLogin.addEventListener('click', () => {
-            tabLogin.classList.add('active');
-            tabRegister.classList.remove('active');
-            formLogin.style.display = 'flex';
-            formRegister.style.display = 'none';
-        });
-
-        tabRegister.addEventListener('click', () => {
-            tabRegister.classList.add('active');
-            tabLogin.classList.remove('active');
-            formRegister.style.display = 'flex';
-            formLogin.style.display = 'none';
-        });
-    }
-
-    if (formLogin) {
-        formLogin.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('loginEmailInput').value.trim();
-            const pass = document.getElementById('loginPasswordInput').value;
-            await loginWithEmail(email, pass);
-        });
-    }
-
-    if (formRegister) {
-        formRegister.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const name = document.getElementById('regNameInput').value.trim();
-            const email = document.getElementById('regEmailInput').value.trim();
-            const pass = document.getElementById('regPasswordInput').value;
-            await registerWithEmail(name, email, pass);
-        });
-    }
-
-    // User profile menu in top bar
-    const profileBtn = document.getElementById('userProfileBtn');
-    const dropdown = document.getElementById('userDropdownCard');
-    if (profileBtn && dropdown) {
-        profileBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
-        });
-
-        document.addEventListener('click', (e) => {
-            if (!profileBtn.contains(e.target) && !dropdown.contains(e.target)) {
-                dropdown.style.display = 'none';
-            }
-        });
-    }
-
-    const menuMyDbsBtn = document.getElementById('menuMyDatabasesBtn');
-    if (menuMyDbsBtn) {
-        menuMyDbsBtn.addEventListener('click', () => {
-            if (dropdown) dropdown.style.display = 'none';
-            document.querySelectorAll('.sidebar .nav-item').forEach(i => i.classList.remove('active'));
-            const navBtn = document.getElementById('navDatabasesBtn');
-            if (navBtn) navBtn.classList.add('active');
-
-            document.querySelectorAll('.studio-pane').forEach(p => p.style.display = 'none');
-            const pane = document.getElementById('pane-databases');
-            if (pane) pane.style.display = 'flex';
-            updateBreadcrumb('Database Hub & Team Sharing');
-            loadUserDatabases();
-        });
-    }
-
-    const menuSwitchAccBtn = document.getElementById('menuSwitchAccountBtn');
-    if (menuSwitchAccBtn) {
-        menuSwitchAccBtn.addEventListener('click', () => {
-            if (dropdown) dropdown.style.display = 'none';
-            openAuthModal();
-        });
-    }
-
-    const menuSignOutBtn = document.getElementById('menuSignOutBtn');
-    if (menuSignOutBtn) {
-        menuSignOutBtn.addEventListener('click', async () => {
-            if (dropdown) dropdown.style.display = 'none';
-            await logout();
-        });
-    }
-
-    // Check auth on load
-    checkAuth();
-}
-
-async function checkAuth() {
-    const tok = localStorage.getItem('redis_studio_session');
-    if (!tok) {
-        // Auto-login as Alex demo user for zero friction testing
-        await loginWithEmail("alex@rediscloud.dev", "redis123", true);
-        return;
-    }
-
-    try {
-        const res = await fetch('/api/auth/me');
-        if (res.ok) {
-            const data = await res.json();
-            currentUser = data.user;
-            currentSessionToken = tok;
-            updateUserProfileUI(currentUser);
-            closeAuthModal();
-            await checkJoinLink();
-            await loadUserDatabases();
-        } else {
-            await loginWithEmail("alex@rediscloud.dev", "redis123", true);
-        }
-    } catch (e) {
-        console.error('Auth verification failed:', e);
-    }
-}
-
-async function checkJoinLink() {
-    const hash = window.location.hash;
-    if (hash && hash.startsWith('#join=')) {
-        const token = hash.substring(6);
-        try {
-            const res = await fetch('/api/databases/join', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token })
-            });
-            const data = await res.json();
-            if (data.success) {
-                showToast(`Joined database "${data.database.name}"!`);
-                window.location.hash = '';
-            } else {
-                showToast(data.error || 'Failed to join database', true);
-            }
-        } catch (e) {
-            showToast('Join link error: ' + e.message, true);
-        }
-    }
-}
-
-async function loginWithEmail(email, password, isSilent = false) {
-    try {
-        const res = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-            throw new Error(data.error || 'Login failed');
-        }
-
-        currentSessionToken = data.token;
-        localStorage.setItem('redis_studio_session', data.token);
-        currentUser = data.user;
-        updateUserProfileUI(currentUser);
-        closeAuthModal();
-        if (!isSilent) showToast(`Signed in as ${currentUser.name}`);
-        await loadUserDatabases();
-        fetchKeys();
-        fetchStats();
-    } catch (e) {
-        if (!isSilent) showToast(e.message, true);
-    }
-}
-
-async function loginWithGoogle(email, name) {
-    try {
-        const res = await fetch('/api/auth/google', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                email,
-                name: name || email.split('@')[0],
-                avatarUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(name || email)}`
-            })
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-            throw new Error(data.error || 'Google login failed');
-        }
-
-        currentSessionToken = data.token;
-        localStorage.setItem('redis_studio_session', data.token);
-        currentUser = data.user;
-        updateUserProfileUI(currentUser);
-        closeAuthModal();
-        showToast(`Google Sign-In successful (${currentUser.email})`);
-        await loadUserDatabases();
-        fetchKeys();
-        fetchStats();
-    } catch (e) {
-        showToast(e.message, true);
-    }
-}
-
-async function registerWithEmail(name, email, password) {
-    try {
-        const res = await fetch('/api/auth/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, password })
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-            throw new Error(data.error || 'Registration failed');
-        }
-
-        currentSessionToken = data.token;
-        localStorage.setItem('redis_studio_session', data.token);
-        currentUser = data.user;
-        updateUserProfileUI(currentUser);
-        closeAuthModal();
-        showToast(`Account created! Welcome, ${currentUser.name}`);
-        await loadUserDatabases();
-        fetchKeys();
-        fetchStats();
-    } catch (e) {
-        showToast(e.message, true);
-    }
-}
-
-async function logout() {
-    try {
-        await fetch('/api/auth/logout', { method: 'POST' });
-    } catch (ignored) {}
-    localStorage.removeItem('redis_studio_session');
-    currentSessionToken = '';
-    currentUser = null;
-    openAuthModal();
-    showToast('Signed out');
-}
-
-function updateUserProfileUI(user) {
-    if (!user) return;
-    const avatar = user.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(user.name || user.email)}`;
-
-    const topImg = document.getElementById('userAvatarImg');
-    if (topImg) topImg.src = avatar;
-    const topName = document.getElementById('userProfileName');
-    if (topName) topName.textContent = user.name || user.email;
-
-    const ddImg = document.getElementById('userDropdownAvatar');
-    if (ddImg) ddImg.src = avatar;
-    const ddName = document.getElementById('userDropdownName');
-    if (ddName) ddName.textContent = user.name || user.email;
-    const ddEmail = document.getElementById('userDropdownEmail');
-    if (ddEmail) ddEmail.textContent = user.email;
-}
-
-function openAuthModal() {
-    const modal = document.getElementById('authModal');
-    if (modal) modal.classList.add('open');
-}
-
-function closeAuthModal() {
-    const modal = document.getElementById('authModal');
-    if (modal) modal.classList.remove('open');
-}
-
-// ==========================================
-// Database Hub Management & Sharing
-// ==========================================
 function initDatabaseHub() {
-    const tabMy = document.getElementById('tabMyDbsBtn');
-    const tabShared = document.getElementById('tabSharedDbsBtn');
     const refreshBtn = document.getElementById('refreshDatabasesBtn');
+    if (refreshBtn) refreshBtn.addEventListener('click', loadUserDatabases);
+
     const openCreateBtn = document.getElementById('openCreateDbModalBtn');
-    const createModal = document.getElementById('createDbModal');
+    if (openCreateBtn) openCreateBtn.addEventListener('click', openCreateDbModal);
+
     const closeCreateBtn = document.getElementById('closeCreateDbModalBtn');
+    if (closeCreateBtn) closeCreateBtn.addEventListener('click', closeCreateDbModal);
+
     const cancelCreateBtn = document.getElementById('cancelCreateDbBtn');
+    if (cancelCreateBtn) cancelCreateBtn.addEventListener('click', closeCreateDbModal);
+
     const createForm = document.getElementById('createDatabaseForm');
-
-    if (tabMy && tabShared) {
-        tabMy.addEventListener('click', () => {
-            tabMy.classList.add('active');
-            tabShared.classList.remove('active');
-            activeDbTab = 'my';
-            renderDatabaseCards();
-        });
-
-        tabShared.addEventListener('click', () => {
-            tabShared.classList.add('active');
-            tabMy.classList.remove('active');
-            activeDbTab = 'shared';
-            renderDatabaseCards();
-        });
-    }
-
-    if (refreshBtn) {
-        refreshBtn.addEventListener('click', () => {
-            loadUserDatabases();
-            showToast('Databases refreshed');
-        });
-    }
-
-    if (openCreateBtn && createModal) {
-        openCreateBtn.addEventListener('click', () => {
-            createModal.classList.add('open');
-            const nameInput = document.getElementById('createDbNameInput');
-            if (nameInput) nameInput.focus();
-        });
-    }
-
-    const closeCreate = () => { if (createModal) createModal.classList.remove('open'); };
-    if (closeCreateBtn) closeCreateBtn.addEventListener('click', closeCreate);
-    if (cancelCreateBtn) cancelCreateBtn.addEventListener('click', closeCreate);
-
     if (createForm) {
         createForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const submitBtn = document.getElementById('submitCreateDbBtn');
             const name = document.getElementById('createDbNameInput').value.trim();
             const id = document.getElementById('createDbIdInput').value.trim();
-            const password = document.getElementById('createDbPassInput').value.trim();
-
-            if (!name) {
-                showToast('Database name is required', true);
-                return;
-            }
-
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<div class="studio-spinner" style="width: 14px; height: 14px; border-width: 2px;"></div> Creating...';
+            const pass = document.getElementById('createDbPassInput').value.trim();
 
             try {
                 const res = await fetch('/api/databases', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, id, password })
+                    body: JSON.stringify({ name, id, password: pass })
                 });
-                const data = await res.json();
-                if (!res.ok || !data.success) {
-                    throw new Error(data.error || 'Failed to create database');
-                }
-
-                showToast(`Created database "${name}"!`);
-                closeCreate();
-                createForm.reset();
-                await loadUserDatabases();
-
-                // Switch to this database and open connect modal
-                if (data.database && data.database.id) {
-                    switchVirtualDatabase(data.database.id);
-                    openConnectModalForDb(data.database.id);
+                if (res.ok) {
+                    showToast(`Database "${name}" created!`);
+                    closeCreateDbModal();
+                    loadUserDatabases();
+                } else {
+                    const err = await res.json();
+                    showToast(err.error || 'Failed to create DB', true);
                 }
             } catch (err) {
-                showToast(err.message, true);
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '<iconify-icon icon="lucide:plus" width="14"></iconify-icon> Create Database';
+                showToast('Create DB error: ' + err.message, true);
             }
+        });
+    }
+
+    // Tabs: My vs Shared
+    const tabMy = document.getElementById('tabMyDbsBtn');
+    const tabShared = document.getElementById('tabSharedDbsBtn');
+    if (tabMy) {
+        tabMy.addEventListener('click', () => {
+            activeDbTab = 'my';
+            tabMy.className = 'db-tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors bg-purple-50 text-purple-700';
+            tabShared.className = 'db-tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors';
+            renderDatabaseCards();
+        });
+    }
+    if (tabShared) {
+        tabShared.addEventListener('click', () => {
+            activeDbTab = 'shared';
+            tabShared.className = 'db-tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors bg-purple-50 text-purple-700';
+            tabMy.className = 'db-tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors';
+            renderDatabaseCards();
         });
     }
 
@@ -2371,13 +1578,7 @@ function initDatabaseHub() {
 async function loadUserDatabases() {
     try {
         const res = await fetch('/api/databases');
-        if (!res.ok) {
-            if (res.status === 401) {
-                openAuthModal();
-                return;
-            }
-            throw new Error('HTTP ' + res.status);
-        }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         userDatabases = {
             myDatabases: data.myDatabases || [],
@@ -2386,357 +1587,1088 @@ async function loadUserDatabases() {
 
         const myCount = userDatabases.myDatabases.length;
         const sharedCount = userDatabases.sharedWithMe.length;
-        const totalCount = myCount + sharedCount;
 
-        const sbBadge = document.getElementById('sbDbsCountBadge');
-        if (sbBadge) sbBadge.textContent = totalCount;
-        const statMy = document.getElementById('statMyDbsCount');
-        if (statMy) statMy.textContent = myCount;
-        const statShared = document.getElementById('statSharedDbsCount');
-        if (statShared) statShared.textContent = sharedCount;
-        const tabMyBadge = document.getElementById('tabMyDbsBadge');
-        if (tabMyBadge) tabMyBadge.textContent = myCount;
-        const tabSharedBadge = document.getElementById('tabSharedDbsBadge');
-        if (tabSharedBadge) tabSharedBadge.textContent = sharedCount;
+        if (document.getElementById('statMyDbsCount')) document.getElementById('statMyDbsCount').textContent = myCount;
+        if (document.getElementById('statSharedDbsCount')) document.getElementById('statSharedDbsCount').textContent = sharedCount;
+        if (document.getElementById('tabMyDbsBadge')) document.getElementById('tabMyDbsBadge').textContent = myCount;
+        if (document.getElementById('tabSharedDbsBadge')) document.getElementById('tabSharedDbsBadge').textContent = sharedCount;
+        if (document.getElementById('sbDbsCountBadge')) document.getElementById('sbDbsCountBadge').textContent = (myCount + sharedCount);
 
         updateVirtualDatabaseSelector(userDatabases.myDatabases, userDatabases.sharedWithMe);
-
-        const all = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe];
-        if (all.length > 0 && (activeVirtualDb === 'default' || !all.some(d => d.id === activeVirtualDb))) {
-            switchVirtualDatabase(all[0].id);
-        }
-
         renderDatabaseCards();
-    } catch (e) {
-        console.error('Failed to load user databases:', e);
+
+    } catch (err) {
+        console.error('Error loading databases:', err);
     }
+}
+
+function updateVirtualDatabaseSelector(myDbs = [], sharedDbs = []) {
+    const select = document.getElementById('vdbSelect');
+    if (!select) return;
+
+    let html = `<option value="default" ${activeVirtualDb === 'default' ? 'selected' : ''}>db0 (Default Root)</option>`;
+    if (myDbs.length > 0) {
+        html += `<optgroup label="My Databases">`;
+        myDbs.forEach(d => {
+            html += `<option value="${escapeHtml(d.id)}" ${activeVirtualDb === d.id ? 'selected' : ''}>${escapeHtml(d.name)} (${d.id})</option>`;
+        });
+        html += `</optgroup>`;
+    }
+    if (sharedDbs.length > 0) {
+        html += `<optgroup label="Shared With Me">`;
+        sharedDbs.forEach(d => {
+            html += `<option value="${escapeHtml(d.id)}" ${activeVirtualDb === d.id ? 'selected' : ''}>${escapeHtml(d.name)} [${d.role}]</option>`;
+        });
+        html += `</optgroup>`;
+    }
+    select.innerHTML = html;
 }
 
 function renderDatabaseCards() {
     const container = document.getElementById('databaseCardsContainer');
     if (!container) return;
 
-    const list = (activeDbTab === 'my') ? userDatabases.myDatabases : userDatabases.sharedWithMe;
+    const list = activeDbTab === 'my' ? userDatabases.myDatabases : userDatabases.sharedWithMe;
 
-    if (!list || list.length === 0) {
-        const emptyMsg = (activeDbTab === 'my')
-            ? `You haven't created any databases yet. Click "New Database" above to provision your first Redis instance!`
-            : `No databases have been shared with you yet. Teammates can share databases with your email (${escapeHtml(currentUser ? currentUser.email : '')}).`;
-        container.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1; padding: 3rem 1rem; text-align: center; color: var(--text-muted);">${emptyMsg}</div>`;
+    if (list.length === 0) {
+        container.innerHTML = `
+            <div class="col-span-full py-16 text-center text-gray-500 bg-white rounded-xl border border-gray-200">
+                <iconify-icon icon="lucide:database" width="36" class="text-gray-300 mx-auto mb-2"></iconify-icon>
+                <div class="font-medium text-gray-800">No databases in this view</div>
+                <div class="text-xs text-gray-400 mt-1">${activeDbTab === 'my' ? 'Create a new database to get started' : 'No team databases have been shared with you yet'}</div>
+            </div>
+        `;
         return;
     }
 
-    container.innerHTML = list.map(db => {
-        const isCurrentActive = (activeVirtualDb === db.id);
-        const role = db.userRole || 'OWNER';
-        const urls = db.connectionUrls || {};
-        const isOwner = (role === 'OWNER');
-
-        return `
-            <div class="db-card ${isCurrentActive ? 'active-db' : ''}" data-dbid="${escapeHtml(db.id)}">
-                <div class="db-card-head">
-                    <div class="db-card-title-wrap">
-                        <div class="db-icon-box">
-                            <iconify-icon icon="lucide:database" width="18"></iconify-icon>
-                        </div>
-                        <div>
-                            <div class="db-card-name">${escapeHtml(db.name)}</div>
-                            <div class="db-card-id-tag">${escapeHtml(db.id)}</div>
-                        </div>
+    container.innerHTML = list.map(db => `
+        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+            <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                        <h4 class="font-semibold text-gray-900 text-base truncate">${escapeHtml(db.name)}</h4>
                     </div>
-                    <span class="db-role-badge-pill ${role}">${escapeHtml(role)}</span>
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${db.role === 'OWNER' || activeDbTab === 'my' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">${db.role || 'OWNER'}</span>
                 </div>
-
-                ${!isOwner ? `
-                <div style="font-size: 0.72rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.35rem;">
-                    <iconify-icon icon="lucide:user" width="12"></iconify-icon>
-                    Owner: <span style="color: var(--text-main); font-weight: 500;">${escapeHtml(db.ownerEmail || '')}</span>
-                </div>` : ''}
-
-                <div class="db-card-stats">
-                    <div class="db-stat-item">
-                        <span class="stat-k">Keys</span>
-                        <span class="stat-v">${(db.keyCount || 0).toLocaleString()}</span>
+                <div class="space-y-1.5 font-mono text-xs text-gray-500">
+                    <div class="flex justify-between">
+                        <span>Database ID:</span>
+                        <span class="text-gray-900 font-semibold">${escapeHtml(db.id)}</span>
                     </div>
-                    <div class="db-stat-item">
-                        <span class="stat-k">Memory</span>
-                        <span class="stat-v">${escapeHtml(db.memoryHuman || '0 B')}</span>
+                    <div class="flex justify-between">
+                        <span>Records:</span>
+                        <span class="text-gray-900 font-semibold">${(db.keyCount || 0).toLocaleString()} keys</span>
                     </div>
-                    <div class="db-stat-item">
-                        <span class="stat-k">Team</span>
-                        <span class="stat-v">${db.collaboratorsCount || 1} users</span>
+                    <div class="flex justify-between">
+                        <span>Memory:</span>
+                        <span class="text-gray-900 font-semibold">${formatBytes(db.memoryUsage || 0)}</span>
                     </div>
-                </div>
-
-                <div class="db-card-url-box">
-                    <div class="url-copy-field">
-                        <span class="prefix">Redis URL</span>
-                        <code title="${escapeHtml(urls.redisUrl || '')}">${escapeHtml(urls.redisUrl || '')}</code>
-                        <button class="btn-icon-copy" onclick="copyToClipboard('${escapeHtml(urls.redisUrl || '')}', 'Copied Redis URL!')" title="Copy URL">
-                            <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
-                        </button>
-                    </div>
-                    <div class="url-copy-field">
-                        <span class="prefix">API Token</span>
-                        <code title="${escapeHtml(db.apiToken || '')}">${escapeHtml(db.apiToken || '')}</code>
-                        <button class="btn-icon-copy" onclick="copyToClipboard('${escapeHtml(db.apiToken || '')}', 'Copied API Token!')" title="Copy Token">
-                            <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="db-card-actions">
-                    <button class="btn ${isCurrentActive ? 'btn-secondary' : 'btn-primary'} btn-sm" onclick="openDatabaseInDatasheet('${escapeHtml(db.id)}')">
-                        <iconify-icon icon="lucide:layout-grid" width="13"></iconify-icon>
-                        ${isCurrentActive ? 'Currently In Datasheet' : 'Open in Datasheet'}
-                    </button>
-                    <button class="btn btn-secondary btn-sm" onclick="openConnectModalForDb('${escapeHtml(db.id)}')">
-                        <iconify-icon icon="lucide:link-2" width="13"></iconify-icon>
-                        Connect
-                    </button>
-                    ${isOwner ? `
-                    <button class="btn btn-secondary btn-sm" onclick="openShareModal('${escapeHtml(db.id)}')">
-                        <iconify-icon icon="lucide:share-2" width="13"></iconify-icon>
-                        Share
-                    </button>
-                    <button class="btn btn-secondary btn-sm text-danger" onclick="deleteDatabase('${escapeHtml(db.id)}', '${escapeHtml(db.name)}')">
-                        <iconify-icon icon="lucide:trash-2" width="13"></iconify-icon>
-                    </button>` : ''}
                 </div>
             </div>
-        `;
-    }).join('');
+
+            <div class="pt-5 mt-4 border-t border-gray-100 flex items-center justify-between gap-2">
+                <button class="flex-1 py-1.5 px-3 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg text-xs font-semibold transition-colors text-center" onclick="openDatabaseInDatasheet('${escapeHtml(db.id)}')">
+                    Open
+                </button>
+                <button class="py-1.5 px-2.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium transition-colors" onclick="openConnectModalForDb('${escapeHtml(db.id)}')" title="Connect URLs">
+                    <iconify-icon icon="lucide:link-2" width="14"></iconify-icon>
+                </button>
+                <button class="py-1.5 px-2.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium transition-colors" onclick="openShareModal('${escapeHtml(db.id)}')" title="Share Database">
+                    <iconify-icon icon="lucide:share-2" width="14"></iconify-icon>
+                </button>
+            </div>
+        </div>
+    `).join('');
 }
 
 function openDatabaseInDatasheet(dbId) {
     switchVirtualDatabase(dbId);
-    document.querySelectorAll('.sidebar .nav-item').forEach(i => i.classList.remove('active'));
-    const datasheetNavItem = document.querySelector('.nav-item[data-type-filter="ALL"]');
-    if (datasheetNavItem) datasheetNavItem.classList.add('active');
-
-    document.querySelectorAll('.studio-pane').forEach(p => p.style.display = 'none');
-    const pane = document.getElementById('pane-datasheet');
-    if (pane) pane.style.display = 'flex';
-    updateBreadcrumb('All Records');
+    navigateToPane('pane-datasheet');
 }
 
-function openConnectModalForDb(dbId) {
-    const all = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe];
-    const db = all.find(d => d.id === dbId);
-    if (!db) {
-        openConnectModal();
-        return;
+function openCreateDbModal() {
+    const modal = document.getElementById('createDbModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        document.getElementById('createDbNameInput').focus();
     }
-
-    const host = window.location.hostname || 'localhost';
-    const redisPort = 6379;
-    const webPort = window.location.port || 8080;
-    const stdUrl = `redis://${db.id}:${db.password}@${host}:${redisPort}`;
-    const tokUrl = `redis://:${db.apiToken}@${host}:${redisPort}`;
-
-    const redisInput = document.getElementById('connRedisUrlInput');
-    const tokenInput = document.getElementById('connTokenUrlInput');
-    if (redisInput) redisInput.value = stdUrl;
-    if (tokenInput) tokenInput.value = tokUrl;
-
-    const select = document.getElementById('connectAccountSelect');
-    if (select) {
-        select.innerHTML = `<option value="${escapeHtml(db.id)}">${escapeHtml(db.name)} (${escapeHtml(db.id)}) - ${escapeHtml(db.userRole || 'OWNER')}</option>`;
-        select.value = db.id;
-    }
-
-    const fakeUser = {
-        username: db.id,
-        password: db.password,
-        apiToken: db.apiToken,
-        virtualDb: db.id
-    };
-    renderConnectSnippet(fakeUser, stdUrl, tokUrl, host, redisPort, webPort);
-
-    const modal = document.getElementById('connectModal');
-    if (modal) modal.classList.add('open');
 }
 
-function openShareModal(dbId) {
+function closeCreateDbModal() {
+    const modal = document.getElementById('createDbModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+// ==========================================
+// Share Database Modal & Invite Links
+// ==========================================
+function initShareModalEvents() {
+    const closeBtn = document.getElementById('closeShareDbModalBtn');
+    const closeBtn2 = document.getElementById('closeShareDbModalBtn2');
+    if (closeBtn) closeBtn.addEventListener('click', closeShareModal);
+    if (closeBtn2) closeBtn2.addEventListener('click', closeShareModal);
+
+    const form = document.getElementById('inviteCollaboratorForm');
+    if (form) {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!activeShareDbId) return;
+
+            const email = document.getElementById('shareTargetEmailInput').value.trim();
+            const role = document.getElementById('shareTargetRoleSelect').value;
+
+            try {
+                const res = await fetch(`/api/databases/share?db=${encodeURIComponent(activeShareDbId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, role })
+                });
+
+                if (res.ok) {
+                    showToast(`Invited ${email} as ${role}!`);
+                    document.getElementById('shareTargetEmailInput').value = '';
+                    openShareModal(activeShareDbId);
+                    loadUserDatabases();
+                } else {
+                    const err = await res.json();
+                    showToast(err.error || 'Failed to invite', true);
+                }
+            } catch (err) {
+                showToast('Invite error: ' + err.message, true);
+            }
+        });
+    }
+
+    const linkCheck = document.getElementById('shareLinkEnableCheck');
+    const linkRoleSelect = document.getElementById('shareLinkRoleSelect');
+    if (linkCheck) {
+        linkCheck.addEventListener('change', async () => {
+            if (!activeShareDbId) return;
+            const enabled = linkCheck.checked;
+            const role = linkRoleSelect ? linkRoleSelect.value : 'VIEWER';
+
+            try {
+                const res = await fetch(`/api/databases/share-link?db=${encodeURIComponent(activeShareDbId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled, role })
+                });
+                if (res.ok) {
+                    openShareModal(activeShareDbId);
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        });
+    }
+
+    const copyLinkBtn = document.getElementById('copyShareLinkBtn');
+    if (copyLinkBtn) {
+        copyLinkBtn.addEventListener('click', () => {
+            const input = document.getElementById('shareLinkInput');
+            if (input) copyToClipboard(input.value, 'Shareable invite link copied!');
+        });
+    }
+}
+
+async function openShareModal(dbId) {
     activeShareDbId = dbId;
-    const all = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe];
-    const db = all.find(d => d.id === dbId);
-    if (!db) return;
-
     const modal = document.getElementById('shareDbModal');
-    const sub = document.getElementById('shareDbModalSubtitle');
-    if (sub) sub.textContent = `Managing access for "${db.name}" (${db.id})`;
+    if (!modal) return;
 
-    renderShareModalCollaborators(db);
+    modal.classList.remove('hidden');
+    document.getElementById('shareDbModalSubtitle').textContent = `Manage collaborators for database [${dbId}]`;
 
-    const linkToggle = document.getElementById('shareLinkEnableCheck');
-    const linkStatus = document.getElementById('shareLinkStatusLabel');
-    const linkBody = document.getElementById('shareLinkBody');
-    const linkInput = document.getElementById('shareLinkInput');
-    const roleSelect = document.getElementById('shareLinkRoleSelect');
+    try {
+        const res = await fetch(`/api/databases/details?db=${encodeURIComponent(dbId)}`);
+        if (res.ok) {
+            const db = await res.json();
+            renderShareModalCollaborators(db);
 
-    const host = window.location.host;
-    const shareLinkUrl = `${window.location.protocol}//${host}/#join=${db.shareLinkToken || ''}`;
+            // Share link state
+            const check = document.getElementById('shareLinkEnableCheck');
+            const statusLbl = document.getElementById('shareLinkStatusLabel');
+            const linkBody = document.getElementById('shareLinkBody');
+            const linkInput = document.getElementById('shareLinkInput');
 
-    if (linkToggle) linkToggle.checked = !!db.shareLinkEnabled;
-    if (linkStatus) linkStatus.textContent = db.shareLinkEnabled ? 'Active' : 'Disabled';
-    if (linkBody) linkBody.style.display = db.shareLinkEnabled ? 'block' : 'none';
-    if (linkInput) linkInput.value = shareLinkUrl;
-    if (roleSelect && db.shareLinkRole) roleSelect.value = db.shareLinkRole;
-
-    if (modal) modal.classList.add('open');
+            if (db.shareLinkEnabled && db.shareLinkToken) {
+                if (check) check.checked = true;
+                if (statusLbl) statusLbl.textContent = 'Active';
+                if (linkBody) linkBody.classList.remove('hidden');
+                if (linkInput) {
+                    const origin = window.location.origin;
+                    linkInput.value = `${origin}/#join=${db.shareLinkToken}`;
+                }
+            } else {
+                if (check) check.checked = false;
+                if (statusLbl) statusLbl.textContent = 'Disabled';
+                if (linkBody) linkBody.classList.add('hidden');
+            }
+        }
+    } catch (err) {
+        console.error('Failed to load DB details:', err);
+    }
 }
 
 function renderShareModalCollaborators(db) {
-    const listEl = document.getElementById('shareCollaboratorsList');
-    if (!listEl) return;
+    const list = document.getElementById('shareCollaboratorsList');
+    if (!list) return;
 
-    const collabs = db.collaborators || [
-        { email: db.ownerEmail, role: 'OWNER' }
-    ];
-
-    listEl.innerHTML = collabs.map(c => {
-        const isOwner = (c.role === 'OWNER');
-        const initial = (c.email ? c.email[0] : 'U').toUpperCase();
-        return `
-            <div class="collaborator-item">
-                <div class="collab-left">
-                    <div class="collab-avatar">${initial}</div>
-                    <div class="collab-email">${escapeHtml(c.email)}</div>
-                </div>
-                <div class="collab-right">
-                    <span class="db-role-badge-pill ${c.role}">${escapeHtml(c.role)}</span>
-                    ${!isOwner ? `
-                    <button class="btn btn-secondary btn-sm" style="padding: 0.2rem 0.5rem; color: #f87171;" onclick="unshareCollaborator('${escapeHtml(db.id)}', '${escapeHtml(c.email)}')">
-                        <iconify-icon icon="lucide:user-minus" width="13"></iconify-icon>
-                        Remove
-                    </button>` : ''}
+    const collabs = db.collaborators || [];
+    list.innerHTML = `
+        <div class="flex items-center justify-between py-2 border-b border-gray-100">
+            <div class="flex items-center gap-2.5">
+                <img src="https://api.dicebear.com/7.x/identicon/svg?seed=${escapeHtml(db.ownerEmail || 'Owner')}" class="w-8 h-8 rounded-full border border-gray-200">
+                <div>
+                    <div class="text-xs font-semibold text-gray-900">${escapeHtml(db.ownerEmail || 'Owner')}</div>
+                    <div class="text-[10px] text-gray-400">Creator &amp; Owner</div>
                 </div>
             </div>
-        `;
-    }).join('');
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-700">OWNER</span>
+        </div>
+        ${collabs.map(c => `
+            <div class="flex items-center justify-between py-2 border-b border-gray-100">
+                <div class="flex items-center gap-2.5">
+                    <img src="https://api.dicebear.com/7.x/identicon/svg?seed=${escapeHtml(c.email)}" class="w-8 h-8 rounded-full border border-gray-200">
+                    <div>
+                        <div class="text-xs font-semibold text-gray-900">${escapeHtml(c.email)}</div>
+                        <div class="text-[10px] text-gray-400">Role: ${c.role}</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700">${c.role}</span>
+                    <button class="text-gray-400 hover:text-red-600 p-1" onclick="removeCollaborator('${escapeHtml(db.id)}', '${escapeHtml(c.email)}')">
+                        <iconify-icon icon="lucide:trash-2" width="13"></iconify-icon>
+                    </button>
+                </div>
+            </div>
+        `).join('')}
+    `;
 }
 
-function initShareModalEvents() {
-    const shareModal = document.getElementById('shareDbModal');
-    const closeBtn1 = document.getElementById('closeShareDbModalBtn');
-    const closeBtn2 = document.getElementById('closeShareDbModalBtn2');
-    const inviteForm = document.getElementById('inviteCollaboratorForm');
-    const linkToggle = document.getElementById('shareLinkEnableCheck');
-    const roleSelect = document.getElementById('shareLinkRoleSelect');
-    const copyLinkBtn = document.getElementById('copyShareLinkBtn');
+async function removeCollaborator(dbId, email) {
+    if (!confirm(`Remove access for ${email}?`)) return;
+    try {
+        const res = await fetch(`/api/databases/collaborator?db=${encodeURIComponent(dbId)}&email=${encodeURIComponent(email)}`, {
+            method: 'DELETE'
+        });
+        if (res.ok) {
+            showToast(`Removed access for ${email}`);
+            openShareModal(dbId);
+        }
+    } catch (err) {
+        showToast('Remove error: ' + err.message, true);
+    }
+}
 
-    const closeShare = () => { if (shareModal) shareModal.classList.remove('open'); };
-    if (closeBtn1) closeBtn1.addEventListener('click', closeShare);
-    if (closeBtn2) closeBtn2.addEventListener('click', closeShare);
+function closeShareModal() {
+    const modal = document.getElementById('shareDbModal');
+    if (modal) modal.classList.add('hidden');
+    activeShareDbId = null;
+}
 
-    if (inviteForm) {
-        inviteForm.addEventListener('submit', async (e) => {
+// ==========================================
+// Connect Modal (Prisma, ioredis, Python, CLI)
+// ==========================================
+function initConnectModal() {
+    const openBtn = document.getElementById('openConnectModalBtn');
+    const closeBtn = document.getElementById('closeConnectModalBtn');
+    const closeBtn2 = document.getElementById('closeConnectModalBtn2');
+
+    if (openBtn) openBtn.addEventListener('click', openConnectModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeConnectModal);
+    if (closeBtn2) closeBtn2.addEventListener('click', closeConnectModal);
+
+    const tabs = document.querySelectorAll('.connect-tab[data-tab]');
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.className = 'connect-tab px-3 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100 flex items-center gap-1.5');
+            tab.className = 'connect-tab px-3 py-1.5 rounded-lg bg-purple-50 text-purple-700 font-semibold flex items-center gap-1.5';
+            activeConnectTab = tab.dataset.tab;
+            renderConnectDetails();
+        });
+    });
+
+    const accountSelect = document.getElementById('connectAccountSelect');
+    if (accountSelect) {
+        accountSelect.addEventListener('change', (e) => {
+            activeConnectTenantUsername = e.target.value;
+            renderConnectDetails();
+        });
+    }
+
+    const copyRedisUrlBtn = document.getElementById('copyConnRedisUrlBtn');
+    if (copyRedisUrlBtn) {
+        copyRedisUrlBtn.addEventListener('click', () => {
+            const input = document.getElementById('connRedisUrlInput');
+            if (input) copyToClipboard(input.value, 'Redis URL copied!');
+        });
+    }
+
+    const copyTokenUrlBtn = document.getElementById('copyConnTokenUrlBtn');
+    if (copyTokenUrlBtn) {
+        copyTokenUrlBtn.addEventListener('click', () => {
+            const input = document.getElementById('connTokenUrlInput');
+            if (input) copyToClipboard(input.value, 'Token-Only URL copied!');
+        });
+    }
+
+    const copySnippetBtn = document.getElementById('copySnippetBtn');
+    if (copySnippetBtn) {
+        copySnippetBtn.addEventListener('click', () => {
+            const code = document.getElementById('connectSnippetCode');
+            if (code) copyToClipboard(code.innerText, 'Code snippet copied!');
+        });
+    }
+}
+
+function openConnectModal() {
+    const modal = document.getElementById('connectModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    populateConnectAccountSelector();
+    renderConnectDetails();
+}
+
+function openConnectModalForDb(dbId) {
+    openConnectModal();
+    const select = document.getElementById('connectAccountSelect');
+    if (select) {
+        select.value = dbId;
+        activeConnectTenantUsername = dbId;
+        renderConnectDetails();
+    }
+}
+
+function closeConnectModal() {
+    const modal = document.getElementById('connectModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function populateConnectAccountSelector() {
+    const select = document.getElementById('connectAccountSelect');
+    if (!select) return;
+
+    let html = `
+        <option value="admin">Root Admin (admin)</option>
+        <option value="tenant-app">Tenant App (tenant-app)</option>
+        <option value="readonly">Read Only (readonly)</option>
+    `;
+
+    userDatabases.myDatabases.forEach(d => {
+        html += `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)} (${d.id}) [OWNER]</option>`;
+    });
+
+    userDatabases.sharedWithMe.forEach(d => {
+        html += `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)} (${d.id}) [${d.role}]</option>`;
+    });
+
+    select.innerHTML = html;
+    if (activeVirtualDb !== 'default') select.value = activeVirtualDb;
+}
+
+function renderConnectDetails() {
+    const host = window.location.hostname || 'localhost';
+    const redisPort = 6379;
+    const webPort = window.location.port || '8080';
+    const username = activeConnectTenantUsername;
+
+    let password = 'tok_admin_live_secret';
+    let dbSuffix = '';
+
+    if (username === 'tenant-app') {
+        password = 'tok_app_tenant';
+    } else if (username === 'readonly') {
+        password = 'tok_ro_public';
+    } else {
+        // Virtual database instance
+        const found = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe].find(d => d.id === username);
+        if (found) {
+            password = found.password || 'db_sec_' + username.slice(0, 6);
+            dbSuffix = `?db=${username}`;
+        }
+    }
+
+    const stdUrl = `redis://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${redisPort}${dbSuffix}`;
+    const tokenUrl = `redis://:${encodeURIComponent(password)}@${host}:${redisPort}`;
+
+    const redisUrlInp = document.getElementById('connRedisUrlInput');
+    const tokenUrlInp = document.getElementById('connTokenUrlInput');
+    if (redisUrlInp) redisUrlInp.value = stdUrl;
+    if (tokenUrlInp) tokenUrlInp.value = tokenUrl;
+
+    renderConnectSnippet(username, stdUrl, tokenUrl, host, redisPort, webPort);
+}
+
+function renderConnectSnippet(user, stdUrl, tokUrl, host, redisPort, webPort) {
+    const titleEl = document.getElementById('snippetLanguageTitle');
+    const codeEl = document.getElementById('connectSnippetCode');
+    if (!codeEl) return;
+
+    if (activeConnectTab === 'prisma') {
+        if (titleEl) titleEl.textContent = 'schema.prisma & .env Configuration';
+        codeEl.innerHTML = escapeHtml(`// 1. In your .env file:
+REDIS_URL="${stdUrl}"
+
+// 2. In your schema.prisma or Prisma Accelerate config:
+datasource db {
+  provider = "postgresql" // or mysql
+  url      = env("DATABASE_URL")
+}
+
+// 3. Connect via standard ioredis inside Prisma extensions:
+import { PrismaClient } from '@prisma/client';
+import Redis from 'ioredis';
+
+const prisma = new PrismaClient();
+const redis = new Redis(process.env.REDIS_URL);
+
+// High-speed cached query
+export async function getUser(id: string) {
+  const cached = await redis.get(\`user:\${id}\`);
+  if (cached) return JSON.parse(cached);
+
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (user) await redis.set(\`user:\${id}\`, JSON.stringify(user), 'EX', 3600);
+  return user;
+}`);
+    } else if (activeConnectTab === 'ioredis') {
+        if (titleEl) titleEl.textContent = 'Node.js (ioredis)';
+        codeEl.innerHTML = escapeHtml(`import Redis from 'ioredis';
+
+// Connect using standard URL
+const redis = new Redis("${stdUrl}");
+
+// Test Ping & Write
+await redis.set('app:welcome', 'Hello from Node.js!');
+const val = await redis.get('app:welcome');
+console.log('Redis response:', val);`);
+    } else if (activeConnectTab === 'python') {
+        if (titleEl) titleEl.textContent = 'Python (redis-py)';
+        codeEl.innerHTML = escapeHtml(`import redis
+
+r = redis.from_url("${stdUrl}")
+
+# Execute commands
+r.set('python:status', 'active')
+print("Status:", r.get('python:status').decode('utf-8'))`);
+    } else if (activeConnectTab === 'cli') {
+        if (titleEl) titleEl.textContent = 'Redis CLI Terminal';
+        codeEl.innerHTML = escapeHtml(`# Connect with standard URL
+redis-cli -u "${stdUrl}"
+
+# Or connect directly with password flag
+redis-cli -h ${host} -p ${redisPort} -a "${user === 'admin' ? 'tok_admin_live_secret' : 'password'}"`);
+    } else if (activeConnectTab === 'rest') {
+        if (titleEl) titleEl.textContent = 'cURL REST API';
+        codeEl.innerHTML = escapeHtml(`# Read key over Edge HTTP
+curl -H "Authorization: Bearer tok_admin_live_secret" \\
+  http://${host}:${webPort}/v1/get/user:1001:profile
+
+# Write key over Edge HTTP
+curl -X POST -H "Authorization: Bearer tok_admin_live_secret" \\
+  -H "Content-Type: application/json" \\
+  -d '{"key": "user:1001:profile", "value": "{\\"name\\": \\"Alice\\"}"}' \\
+  http://${host}:${webPort}/v1/set`);
+    }
+}
+
+// ==========================================
+// Authentication & User Profiles
+// ==========================================
+function initAuth() {
+    const profileBtn = document.getElementById('userProfileBtn');
+    const dropdown = document.getElementById('userDropdownCard');
+    const signOutBtn = document.getElementById('menuSignOutBtn');
+    const switchAccountBtn = document.getElementById('menuSwitchAccountBtn');
+
+    if (profileBtn && dropdown) {
+        profileBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (!dropdown.contains(e.target) && !profileBtn.contains(e.target)) {
+                dropdown.classList.add('hidden');
+            }
+        });
+    }
+
+    if (signOutBtn) {
+        signOutBtn.addEventListener('click', () => {
+            localStorage.removeItem('redis_studio_session');
+            currentUser = null;
+            openAuthModal();
+        });
+    }
+
+    if (switchAccountBtn) {
+        switchAccountBtn.addEventListener('click', () => {
+            if (dropdown) dropdown.classList.add('hidden');
+            openAuthModal();
+        });
+    }
+
+    // Google Sign In
+    const googleBtn = document.getElementById('googleSignInBtn');
+    if (googleBtn) {
+        googleBtn.addEventListener('click', () => {
+            authenticateDemoUser('alex@rediscloud.dev', 'Alex Rivera');
+        });
+    }
+
+    // Demo profile 1-click buttons
+    const demoAlex = document.getElementById('demoUserAlexBtn');
+    const demoSarah = document.getElementById('demoUserSarahBtn');
+    if (demoAlex) {
+        demoAlex.addEventListener('click', () => {
+            authenticateDemoUser('alex@rediscloud.dev', 'Alex Rivera');
+        });
+    }
+    if (demoSarah) {
+        demoSarah.addEventListener('click', () => {
+            authenticateDemoUser('sarah@company.io', 'Sarah Chen');
+        });
+    }
+
+    // Forms
+    const loginForm = document.getElementById('authLoginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', (e) => {
             e.preventDefault();
-            if (!activeShareDbId) return;
-            const email = document.getElementById('shareTargetEmailInput').value.trim();
-            const role = document.getElementById('shareTargetRoleSelect').value;
-            const sendBtn = document.getElementById('sendInviteBtn');
+            const email = document.getElementById('loginEmailInput').value.trim();
+            authenticateDemoUser(email, email.split('@')[0]);
+        });
+    }
 
-            sendBtn.disabled = true;
-            try {
-                const res = await fetch('/api/databases/share', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ dbId: activeShareDbId, targetEmail: email, role })
-                });
+    const regForm = document.getElementById('authRegisterForm');
+    if (regForm) {
+        regForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const email = document.getElementById('regEmailInput').value.trim();
+            const name = document.getElementById('regNameInput').value.trim();
+            authenticateDemoUser(email, name);
+        });
+    }
+
+    // Tabs inside modal
+    const tabLogin = document.getElementById('authTabLogin');
+    const tabReg = document.getElementById('authTabRegister');
+    if (tabLogin && tabReg) {
+        tabLogin.addEventListener('click', () => {
+            tabLogin.className = 'flex-1 py-1.5 rounded-md bg-white text-gray-900 shadow-sm transition-all';
+            tabReg.className = 'flex-1 py-1.5 rounded-md text-gray-500 hover:text-gray-900 transition-all';
+            document.getElementById('authLoginForm').classList.remove('hidden');
+            document.getElementById('authRegisterForm').classList.add('hidden');
+        });
+        tabReg.addEventListener('click', () => {
+            tabReg.className = 'flex-1 py-1.5 rounded-md bg-white text-gray-900 shadow-sm transition-all';
+            tabLogin.className = 'flex-1 py-1.5 rounded-md text-gray-500 hover:text-gray-900 transition-all';
+            document.getElementById('authRegisterForm').classList.remove('hidden');
+            document.getElementById('authLoginForm').classList.add('hidden');
+        });
+    }
+
+    // Default user on start
+    currentUser = {
+        name: 'Alex Rivera',
+        email: 'alex@rediscloud.dev',
+        avatar: 'https://api.dicebear.com/7.x/identicon/svg?seed=Alex'
+    };
+    updateUserProfileUI(currentUser);
+}
+
+function authenticateDemoUser(email, name) {
+    currentUser = {
+        name: name || 'Alex Rivera',
+        email: email,
+        avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(name || email)}`
+    };
+    updateUserProfileUI(currentUser);
+    closeAuthModal();
+    showToast(`Signed in as ${currentUser.name}`);
+    loadUserDatabases();
+}
+
+function updateUserProfileUI(user) {
+    if (!user) return;
+    const avatar = document.getElementById('userAvatarImg');
+    const dropAvatar = document.getElementById('userDropdownAvatar');
+    const dropName = document.getElementById('userDropdownName');
+    const dropEmail = document.getElementById('userDropdownEmail');
+
+    if (avatar) avatar.src = user.avatar;
+    if (dropAvatar) dropAvatar.src = user.avatar;
+    if (dropName) dropName.textContent = user.name;
+    if (dropEmail) dropEmail.textContent = user.email;
+}
+
+function openAuthModal() {
+    const modal = document.getElementById('authModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeAuthModal() {
+    const modal = document.getElementById('authModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+// Check join invite hash in URL (e.g. #join=lnk_xxxx)
+async function checkInviteHash() {
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#join=')) {
+        const token = hash.replace('#join=', '');
+        try {
+            const res = await fetch(`/api/databases/join?token=${encodeURIComponent(token)}`, {
+                method: 'POST'
+            });
+            if (res.ok) {
                 const data = await res.json();
-                if (!res.ok || !data.success) {
-                    throw new Error(data.error || 'Failed to share database');
+                showToast(`Joined database "${data.databaseName || data.databaseId}" as ${data.role}!`);
+                window.location.hash = '';
+                loadUserDatabases();
+                if (data.databaseId) switchVirtualDatabase(data.databaseId);
+            }
+        } catch (err) {
+            console.error('Join error:', err);
+        }
+    }
+}
+
+// ==========================================
+// Cloud REST API & RLS Playground
+// ==========================================
+function initCloudApiPlayground() {
+    const epSelect = document.getElementById('apiEndpointSelect');
+    const tokenSelect = document.getElementById('apiTokenSelect');
+    const keyInput = document.getElementById('apiTargetKey');
+    const executeBtn = document.getElementById('apiExecuteBtn');
+    const copyCurlBtn = document.getElementById('copyCurlBtn');
+    const refreshAclBtn = document.getElementById('refreshAclBtn');
+
+    if (epSelect) epSelect.addEventListener('change', updateCurlSnippet);
+    if (tokenSelect) {
+        tokenSelect.addEventListener('change', () => {
+            const isCustom = tokenSelect.value === 'custom';
+            const grp = document.getElementById('apiCustomTokenGroup');
+            if (grp) grp.classList.toggle('hidden', !isCustom);
+            updateCurlSnippet();
+        });
+    }
+    if (keyInput) keyInput.addEventListener('input', updateCurlSnippet);
+
+    if (executeBtn) {
+        executeBtn.addEventListener('click', async () => {
+            const endpoint = epSelect.value;
+            const token = getSelectedApiToken();
+            const key = keyInput.value.trim();
+            const body = document.getElementById('apiRequestBody').value.trim();
+            const respStatus = document.getElementById('apiResponseStatus');
+            const respBox = document.getElementById('apiResponseBox');
+
+            respStatus.textContent = 'Sending...';
+            respStatus.className = 'text-xs font-bold text-purple-600';
+            respBox.textContent = '// Request in-flight...';
+
+            try {
+                let url = '';
+                let method = 'GET';
+                let reqBody = null;
+
+                if (endpoint === 'GET_KEY') {
+                    url = `/v1/get/${encodeURIComponent(key)}`;
+                    method = 'GET';
+                } else if (endpoint === 'SET_KEY') {
+                    url = `/v1/set`;
+                    method = 'POST';
+                    reqBody = body || JSON.stringify({ key, value: 'sample_value', ttl: 3600 });
+                } else if (endpoint === 'LPUSH') {
+                    url = `/v1/lpush`;
+                    method = 'POST';
+                    reqBody = body || JSON.stringify({ key, values: ['alpha', 'beta'] });
+                } else if (endpoint === 'LRANGE') {
+                    url = `/v1/lrange/${encodeURIComponent(key)}?start=0&stop=-1`;
+                    method = 'GET';
+                } else if (endpoint === 'HSET') {
+                    url = `/v1/hset`;
+                    method = 'POST';
+                    reqBody = body || JSON.stringify({ key, fields: { status: 'active', count: '42' } });
+                } else if (endpoint === 'HGETALL') {
+                    url = `/v1/hgetall/${encodeURIComponent(key)}`;
+                    method = 'GET';
+                } else if (endpoint === 'DEL_KEY') {
+                    url = `/v1/del/${encodeURIComponent(key)}`;
+                    method = 'DELETE';
+                } else if (endpoint === 'PIPELINE') {
+                    url = `/v1/pipeline`;
+                    method = 'POST';
+                    reqBody = body || JSON.stringify({ commands: [['SET', 'a', '1'], ['GET', 'a']] });
+                } else if (endpoint === 'RAW_CMD') {
+                    url = `/v1/command`;
+                    method = 'POST';
+                    reqBody = body || JSON.stringify({ command: 'PING' });
                 }
 
-                showToast(`Shared with ${email} as ${role}!`);
-                document.getElementById('shareTargetEmailInput').value = '';
-                await loadUserDatabases();
-                const all = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe];
-                const updatedDb = all.find(d => d.id === activeShareDbId);
-                if (updatedDb) renderShareModalCollaborators(updatedDb);
+                const res = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: reqBody
+                });
+
+                respStatus.textContent = `${res.status} ${res.statusText}`;
+                respStatus.className = `text-xs font-bold ${res.ok ? 'text-emerald-600' : 'text-red-600'}`;
+
+                const text = await res.text();
+                try {
+                    const parsed = JSON.parse(text);
+                    respBox.textContent = JSON.stringify(parsed, null, 2);
+                } catch (e) {
+                    respBox.textContent = text;
+                }
+
+                fetchKeys();
+                fetchStats();
+
             } catch (err) {
-                showToast(err.message, true);
-            } finally {
-                sendBtn.disabled = false;
+                respStatus.textContent = 'Network Error';
+                respStatus.className = 'text-xs font-bold text-red-600';
+                respBox.textContent = err.message;
             }
         });
     }
 
-    const updateShareLinkState = async () => {
-        if (!activeShareDbId) return;
-        const enabled = linkToggle.checked;
-        const role = roleSelect.value;
+    if (copyCurlBtn) {
+        copyCurlBtn.addEventListener('click', () => {
+            const snippet = document.getElementById('apiCurlSnippet');
+            if (snippet) copyToClipboard(snippet.textContent, 'cURL command copied!');
+        });
+    }
+
+    if (refreshAclBtn) {
+        refreshAclBtn.addEventListener('click', loadAclUsers);
+    }
+
+    updateCurlSnippet();
+}
+
+function getSelectedApiToken() {
+    const sel = document.getElementById('apiTokenSelect');
+    if (!sel) return 'tok_admin_live_secret';
+    if (sel.value === 'custom') {
+        const inp = document.getElementById('apiCustomTokenInput');
+        return inp ? inp.value.trim() : '';
+    }
+    return sel.value;
+}
+
+function updateCurlSnippet() {
+    const snippet = document.getElementById('apiCurlSnippet');
+    if (!snippet) return;
+
+    const ep = document.getElementById('apiEndpointSelect').value;
+    const token = getSelectedApiToken();
+    const key = document.getElementById('apiTargetKey').value || 'app:user:101';
+    const host = window.location.host || 'localhost:8080';
+
+    if (ep === 'GET_KEY') {
+        snippet.textContent = `curl -H "Authorization: Bearer ${token}" http://${host}/v1/get/${key}`;
+    } else if (ep === 'SET_KEY') {
+        snippet.textContent = `curl -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '{"key":"${key}","value":"{\\"status\\":\\"active\\"}"}' http://${host}/v1/set`;
+    } else if (ep === 'HGETALL') {
+        snippet.textContent = `curl -H "Authorization: Bearer ${token}" http://${host}/v1/hgetall/${key}`;
+    } else if (ep === 'DEL_KEY') {
+        snippet.textContent = `curl -X DELETE -H "Authorization: Bearer ${token}" http://${host}/v1/del/${key}`;
+    } else {
+        snippet.textContent = `curl -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '{"command":"PING"}' http://${host}/v1/command`;
+    }
+}
+
+async function loadAclUsers() {
+    const container = document.getElementById('aclUserListContainer');
+    if (!container) return;
+
+    try {
+        const res = await fetch('/api/acl');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const users = data.users || [];
+
+        container.innerHTML = users.map(u => `
+            <div class="p-3 bg-gray-50 rounded-xl border border-gray-100 mb-3 space-y-2">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full ${u.role === 'ADMIN' ? 'bg-purple-600' : u.role === 'READ_WRITE' ? 'bg-blue-600' : 'bg-gray-400'}"></span>
+                        <span class="font-semibold text-xs text-gray-900">${escapeHtml(u.username)}</span>
+                    </div>
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${u.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">${u.role}</span>
+                </div>
+                <div class="text-[11px] text-gray-500 font-mono bg-white p-2 rounded border border-gray-200 flex items-center justify-between">
+                    <span class="truncate">${u.apiToken}</span>
+                    <button class="text-purple-600 hover:text-purple-800 ml-2" onclick="copyToClipboard('${u.apiToken}', 'Token copied!')" title="Copy Token">
+                        <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
+                    </button>
+                </div>
+                <div class="text-[11px] text-gray-400">
+                    Allowed Namespaces: <strong class="text-gray-600 font-mono">${escapeHtml(u.keyPatterns || '*')}</strong>
+                </div>
+            </div>
+        `).join('');
+    } catch (err) {
+        container.innerHTML = `<div class="p-4 text-xs text-red-500">Failed to load ACL: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+// ==========================================
+// Virtual Threads Concurrency Benchmark Engine
+// ==========================================
+function initBenchmarkEngine() {
+    const startBtn = document.getElementById('startBenchmarkBtn');
+    if (!startBtn) return;
+
+    startBtn.addEventListener('click', async () => {
+        const ops = parseInt(document.getElementById('benchOpsSelect').value, 10);
+        const concurrency = parseInt(document.getElementById('benchConcurrencySelect').value, 10);
+
+        startBtn.disabled = true;
+        startBtn.innerHTML = `<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Running Benchmark...`;
+
         try {
-            const res = await fetch('/api/databases/share-link', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ dbId: activeShareDbId, enabled, role })
+            const res = await fetch(`/api/benchmark?ops=${ops}&concurrency=${concurrency}${activeVirtualDb !== 'default' ? '&db=' + encodeURIComponent(activeVirtualDb) : ''}`, {
+                method: 'POST'
             });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
-            if (data.success) {
-                document.getElementById('shareLinkStatusLabel').textContent = enabled ? 'Active' : 'Disabled';
-                document.getElementById('shareLinkBody').style.display = enabled ? 'block' : 'none';
-                const host = window.location.host;
-                const linkUrl = `${window.location.protocol}//${host}/#join=${data.token || ''}`;
-                document.getElementById('shareLinkInput').value = linkUrl;
-                showToast(enabled ? 'Invite link enabled' : 'Invite link disabled');
-                await loadUserDatabases();
+
+            document.getElementById('benchOpsPerSec').textContent = (data.opsPerSec || 0).toLocaleString();
+            document.getElementById('benchDuration').textContent = `${data.durationMs || 0} ms`;
+            document.getElementById('benchCompletedOps').textContent = (data.completedOps || 0).toLocaleString();
+            document.getElementById('benchConcurrencyLabel').textContent = `${concurrency} Loom Threads`;
+
+            document.getElementById('benchP50').textContent = `${data.p50 || 0} ms`;
+            document.getElementById('benchP90').textContent = `${data.p90 || 0} ms`;
+            document.getElementById('benchP99').textContent = `${data.p99 || 0} ms`;
+            document.getElementById('benchMin').textContent = `${data.min || 0} ms`;
+            document.getElementById('benchMax').textContent = `${data.max || 0} ms`;
+
+            // Also update overview KPI
+            const ovOps = document.getElementById('ovOpsPerSec');
+            if (ovOps) ovOps.textContent = (data.opsPerSec || 0).toLocaleString();
+
+            const ovLat = document.getElementById('ovAvgLatency');
+            if (ovLat) ovLat.textContent = `${data.p50 || 0} ms`;
+
+            showToast(`Stress test completed: ${(data.opsPerSec || 0).toLocaleString()} ops/sec!`);
+            fetchStats();
+        } catch (err) {
+            showToast('Benchmark failed: ' + err.message, true);
+        } finally {
+            startBtn.disabled = false;
+            startBtn.innerHTML = `<iconify-icon icon="lucide:zap" width="16"></iconify-icon> Start Stress Test`;
+        }
+    });
+}
+
+function initTenantsPanel() {
+    // Tenants initialization
+}
+
+function loadTenants() {
+    loadAclUsers();
+}
+
+// ==========================================
+// Live Telemetry & Stats Fetching
+// ==========================================
+async function fetchStats() {
+    try {
+        const res = await fetch(`/api/stats${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const memBytes = data.used_memory_bytes || data.usedMemoryBytes || 0;
+        const totalCmds = data.total_commands_processed || data.totalCommandsProcessed || 0;
+        const uptime = data.uptime_in_seconds || data.uptimeSeconds || 0;
+        const totalKeys = data.total_keys || data.totalKeys || 0;
+        const clients = data.connected_clients || data.connectedClients || 1;
+
+        if (document.getElementById('sbMemory')) document.getElementById('sbMemory').textContent = formatBytes(memBytes);
+        if (document.getElementById('sbCommands')) document.getElementById('sbCommands').textContent = totalCmds.toLocaleString();
+        if (document.getElementById('sbUptime')) document.getElementById('sbUptime').textContent = formatUptimeShort(uptime);
+
+        // Overview Memory Card
+        const memDisplay = document.getElementById('ovMemoryUsageDisplay');
+        if (memDisplay) memDisplay.textContent = formatBytes(memBytes);
+
+        const memBar = document.getElementById('ovMemoryProgressBar');
+        if (memBar) {
+            const pct = Math.min(100, Math.max(5, (memBytes / (256 * 1024 * 1024)) * 100));
+            memBar.style.width = pct.toFixed(1) + '%';
+        }
+
+        const clientsEl = document.getElementById('ovConnectedClients');
+        if (clientsEl) clientsEl.textContent = `${clients} Client Connections`;
+
+        const ovKeys = document.getElementById('ovTotalKeys');
+        if (ovKeys && totalKeys > 0) ovKeys.textContent = totalKeys.toLocaleString();
+
+    } catch (e) {
+        // Ignore telemetry fetch errors
+    }
+}
+
+function initLiveSync() {
+    const check = document.getElementById('autoPollCheck');
+    const refreshBtn = document.getElementById('manualRefreshBtn');
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            fetchKeys();
+            fetchStats();
+            showToast('Refreshed data');
+        });
+    }
+
+    if (check) {
+        check.addEventListener('change', () => {
+            if (check.checked) startPolling();
+            else stopPolling();
+        });
+        if (check.checked) startPolling();
+    }
+}
+
+function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(() => {
+        fetchKeys();
+        fetchStats();
+    }, 3000);
+}
+
+function stopPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+}
+
+// ==========================================
+// Export / Import
+// ==========================================
+function initExportImport() {
+    const exportBtn = document.getElementById('exportDataBtn');
+    const importBtn = document.getElementById('importDataBtn');
+    const fileInput = document.getElementById('importFileInput');
+
+    if (exportBtn) {
+        exportBtn.addEventListener('click', async () => {
+            try {
+                const res = await fetch(`/api/export${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`);
+                const data = await res.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `redis-${activeVirtualDb}-${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('Database exported as JSON');
+            } catch (err) {
+                showToast('Export failed: ' + err.message, true);
             }
-        } catch (e) {
-            showToast('Failed to update share link: ' + e.message, true);
-        }
-    };
+        });
+    }
 
-    if (linkToggle) linkToggle.addEventListener('change', updateShareLinkState);
-    if (roleSelect) roleSelect.addEventListener('change', updateShareLinkState);
-
-    if (copyLinkBtn) {
-        copyLinkBtn.addEventListener('click', () => {
-            const url = document.getElementById('shareLinkInput').value;
-            copyToClipboard(url, 'Invite link copied to clipboard!');
+    if (importBtn && fileInput) {
+        importBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (evt) => {
+                try {
+                    const json = JSON.parse(evt.target.result);
+                    const res = await fetch(`/api/import${activeVirtualDb !== 'default' ? '?db=' + encodeURIComponent(activeVirtualDb) : ''}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(json)
+                    });
+                    if (res.ok) {
+                        showToast('Database records imported successfully');
+                        fetchKeys();
+                        fetchStats();
+                    } else {
+                        showToast('Import failed', true);
+                    }
+                } catch (err) {
+                    showToast('Import parsing error: ' + err.message, true);
+                }
+            };
+            reader.readAsText(file);
         });
     }
 }
 
-async function unshareCollaborator(dbId, targetEmail) {
-    if (!confirm(`Remove collaborator ${targetEmail}?`)) return;
-    try {
-        const res = await fetch('/api/databases/unshare', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ dbId, targetEmail })
-        });
-        const data = await res.json();
-        if (data.success) {
-            showToast(`Removed access for ${targetEmail}`);
-            await loadUserDatabases();
-            const all = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe];
-            const updatedDb = all.find(d => d.id === dbId);
-            if (updatedDb) renderShareModalCollaborators(updatedDb);
-        }
-    } catch (e) {
-        showToast('Error removing collaborator: ' + e.message, true);
+// ==========================================
+// Utilities
+// ==========================================
+function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function formatUptimeShort(sec) {
+    if (!sec || sec < 60) return `${sec || 0}s`;
+    const m = Math.floor(sec / 60);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+}
+
+function escapeHtml(str) {
+    if (typeof str !== 'string') return String(str || '');
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function showToast(msg, isErr = false) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    const div = document.createElement('div');
+    div.className = `toast-msg ${isErr ? 'error' : ''}`;
+    div.innerHTML = `
+        <iconify-icon icon="${isErr ? 'lucide:alert-circle' : 'lucide:check-circle-2'}" width="18" class="${isErr ? 'text-red-500' : 'text-purple-600'} shrink-0"></iconify-icon>
+        <span class="text-xs font-medium">${escapeHtml(msg)}</span>
+    `;
+    container.appendChild(div);
+
+    setTimeout(() => {
+        div.classList.add('toast-out');
+        setTimeout(() => div.remove(), 250);
+    }, 3200);
+}
+
+function copyToClipboard(text, successMsg = 'Copied to clipboard!') {
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+            showToast(successMsg);
+        }).catch(() => fallbackCopy(text, successMsg));
+    } else {
+        fallbackCopy(text, successMsg);
     }
 }
 
-async function deleteDatabase(dbId, dbName) {
-    if (!confirm(`⚠️ Are you sure you want to DELETE database "${dbName}" (${dbId})? All keys and data will be permanently erased.`)) {
-        return;
-    }
-    try {
-        const res = await fetch(`/api/databases?id=${encodeURIComponent(dbId)}`, { method: 'DELETE' });
-        const data = await res.json();
-        if (data.success) {
-            showToast(`Database "${dbName}" deleted`);
-            await loadUserDatabases();
-        } else {
-            showToast(data.error || 'Failed to delete database', true);
-        }
-    } catch (e) {
-        showToast('Error deleting database: ' + e.message, true);
-    }
+function fallbackCopy(text, successMsg) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast(successMsg);
 }
-
-
