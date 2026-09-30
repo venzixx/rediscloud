@@ -1,0 +1,8 @@
+target/
+data/
+*.log
+*.aof
+.git/
+.idea/
+*.iml
+.vscode/
