@@ -30,7 +30,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Redis Cloud ${{ github.ref_name }}
-          files: target/redis-java-1.0.0.jar
+          files: target/redis-java-*.jar
           generate_release_notes: true
           draft: false
           prerelease: false
