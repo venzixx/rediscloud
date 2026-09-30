@@ -23,11 +23,13 @@ public class ApiHandler implements HttpHandler {
 
     private final StorageEngine storage;
     private final CommandRegistry registry;
+    private final com.myredis.security.AclEngine aclEngine;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public ApiHandler(StorageEngine storage, CommandRegistry registry) {
+    public ApiHandler(StorageEngine storage, CommandRegistry registry, com.myredis.security.AclEngine aclEngine) {
         this.storage = storage;
         this.registry = registry;
+        this.aclEngine = aclEngine;
     }
 
     @Override
@@ -65,6 +67,10 @@ public class ApiHandler implements HttpHandler {
                 handleExport(exchange);
             } else if (path.equals("/api/import") && "POST".equals(method)) {
                 handleImport(exchange);
+            } else if (path.equals("/api/acl") && "GET".equals(method)) {
+                handleAclList(exchange);
+            } else if (path.equals("/api/benchmark") && "POST".equals(method)) {
+                handleBenchmark(exchange);
             } else if (path.equals("/api/flush") && "POST".equals(method)) {
                 handleFlush(exchange);
             } else {
@@ -307,6 +313,34 @@ public class ApiHandler implements HttpHandler {
             }
         }
         sendJson(exchange, 200, Map.of("success", true, "importedCount", imported));
+    }
+
+    private void handleAclList(HttpExchange exchange) throws IOException {
+        List<Map<String, Object>> users = aclEngine != null ? aclEngine.listUsersSummary() : Collections.emptyList();
+        sendJson(exchange, 200, Map.of("users", users));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleBenchmark(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        int totalOps = 10000;
+        int concurrency = 50;
+
+        if (!body.isBlank()) {
+            try {
+                Map<String, Object> req = mapper.readValue(body, Map.class);
+                if (req.containsKey("totalOperations")) totalOps = ((Number) req.get("totalOperations")).intValue();
+                if (req.containsKey("concurrency")) concurrency = ((Number) req.get("concurrency")).intValue();
+            } catch (Exception ignored) {}
+        }
+
+        try {
+            com.myredis.benchmark.BenchmarkEngine.BenchmarkResult res =
+                    com.myredis.benchmark.BenchmarkEngine.runBenchmark(storage, registry, totalOps, concurrency);
+            sendJson(exchange, 200, res);
+        } catch (InterruptedException e) {
+            sendJson(exchange, 500, Map.of("error", "Benchmark interrupted"));
+        }
     }
 
     private void handleFlush(HttpExchange exchange) throws IOException {

@@ -40,27 +40,27 @@
             <div class="sidebar-section">
                 <span class="section-label">DATA VIEWS</span>
                 <nav class="nav-tree">
-                    <button class="nav-item active" data-type-filter="ALL">
+                    <button class="nav-item active" data-view-pane="pane-datasheet" data-type-filter="ALL">
                         <iconify-icon icon="lucide:layout-grid" class="nav-icon" width="16"></iconify-icon>
                         <span class="nav-text">All Records</span>
                         <span class="nav-count" id="countAll">-</span>
                     </button>
-                    <button class="nav-item" data-type-filter="string">
+                    <button class="nav-item" data-view-pane="pane-datasheet" data-type-filter="string">
                         <iconify-icon icon="lucide:type" class="nav-icon str" width="16"></iconify-icon>
                         <span class="nav-text">Strings</span>
                         <span class="nav-count" id="countStrings">-</span>
                     </button>
-                    <button class="nav-item" data-type-filter="hash">
+                    <button class="nav-item" data-view-pane="pane-datasheet" data-type-filter="hash">
                         <iconify-icon icon="lucide:boxes" class="nav-icon hsh" width="16"></iconify-icon>
                         <span class="nav-text">Hashes</span>
                         <span class="nav-count" id="countHashes">-</span>
                     </button>
-                    <button class="nav-item" data-type-filter="list">
+                    <button class="nav-item" data-view-pane="pane-datasheet" data-type-filter="list">
                         <iconify-icon icon="lucide:list-ordered" class="nav-icon lst" width="16"></iconify-icon>
                         <span class="nav-text">Lists</span>
                         <span class="nav-count" id="countLists">-</span>
                     </button>
-                    <button class="nav-item" data-type-filter="set">
+                    <button class="nav-item" data-view-pane="pane-datasheet" data-type-filter="set">
                         <iconify-icon icon="lucide:shapes" class="nav-icon st" width="16"></iconify-icon>
                         <span class="nav-text">Sets</span>
                         <span class="nav-count" id="countSets">-</span>
@@ -80,6 +80,21 @@
                     <!-- Populated dynamically (e.g. user:, devops:, active:) -->
                     <div class="tree-item empty">Scanning keys...</div>
                 </div>
+            </div>
+
+            <!-- Cloud & Enterprise Platform -->
+            <div class="sidebar-section">
+                <span class="section-label">CLOUD &amp; PLATFORM</span>
+                <nav class="nav-tree">
+                    <button class="nav-item" id="navCloudApiBtn" data-view-pane="pane-cloud-api">
+                        <iconify-icon icon="lucide:shield-check" class="nav-icon" width="16" style="color: #34d399;"></iconify-icon>
+                        <span class="nav-text">Cloud API &amp; RLS</span>
+                    </button>
+                    <button class="nav-item" id="navBenchmarkBtn" data-view-pane="pane-benchmark">
+                        <iconify-icon icon="lucide:gauge" class="nav-icon" width="16" style="color: #fbbf24;"></iconify-icon>
+                        <span class="nav-text">Stress Benchmark</span>
+                    </button>
+                </nav>
             </div>
 
             <!-- Management Tools -->
@@ -162,62 +177,316 @@
                 </div>
             </header>
 
-            <!-- Datasheet Toolbar -->
-            <div class="datasheet-toolbar">
-                <div class="search-box">
-                    <iconify-icon icon="lucide:search" width="15"></iconify-icon>
-                    <input type="text" id="filterSearchInput" placeholder="Filter by key name, prefix, or glob (e.g. user:*)...">
+            <!-- Pane 1: Datasheet Grid Studio -->
+            <div class="studio-pane" id="pane-datasheet">
+                <!-- Datasheet Toolbar -->
+                <div class="datasheet-toolbar">
+                    <div class="search-box">
+                        <iconify-icon icon="lucide:search" width="15"></iconify-icon>
+                        <input type="text" id="filterSearchInput" placeholder="Filter by key name, prefix, or glob (e.g. user:*)...">
+                    </div>
+
+                    <div class="toolbar-filters">
+                        <select id="sortSelect" class="studio-select">
+                            <option value="key_asc">Sort: Key (A → Z)</option>
+                            <option value="key_desc">Sort: Key (Z → A)</option>
+                            <option value="size_desc">Sort: Size (High → Low)</option>
+                            <option value="ttl_asc">Sort: TTL (Expiring Soon)</option>
+                            <option value="created_desc">Sort: Recently Created</option>
+                        </select>
+
+                        <span class="record-counter" id="recordCounter">Showing 0 records</span>
+                    </div>
+
+                    <!-- Batch Selection Actions Bar (hidden by default) -->
+                    <div class="batch-bar" id="batchActionBar">
+                        <span class="batch-count" id="batchCountText">0 selected</span>
+                        <button class="btn btn-outline-danger btn-sm" id="batchDeleteBtn">
+                            <iconify-icon icon="lucide:trash-2" width="13"></iconify-icon>
+                            Delete Selected
+                        </button>
+                        <button class="btn btn-secondary btn-sm" id="batchCancelBtn">Deselect</button>
+                    </div>
                 </div>
 
-                <div class="toolbar-filters">
-                    <select id="sortSelect" class="studio-select">
-                        <option value="key_asc">Sort: Key (A → Z)</option>
-                        <option value="key_desc">Sort: Key (Z → A)</option>
-                        <option value="size_desc">Sort: Size (High → Low)</option>
-                        <option value="ttl_asc">Sort: TTL (Expiring Soon)</option>
-                        <option value="created_desc">Sort: Recently Created</option>
-                    </select>
-
-                    <span class="record-counter" id="recordCounter">Showing 0 records</span>
-                </div>
-
-                <!-- Batch Selection Actions Bar (hidden by default) -->
-                <div class="batch-bar" id="batchActionBar">
-                    <span class="batch-count" id="batchCountText">0 selected</span>
-                    <button class="btn btn-outline-danger btn-sm" id="batchDeleteBtn">
-                        <iconify-icon icon="lucide:trash-2" width="13"></iconify-icon>
-                        Delete Selected
-                    </button>
-                    <button class="btn btn-secondary btn-sm" id="batchCancelBtn">Deselect</button>
+                <!-- Datasheet Grid Table -->
+                <div class="grid-container">
+                    <table class="datasheet-table" id="datasheetTable">
+                        <thead>
+                            <tr>
+                                <th class="col-checkbox"><input type="checkbox" id="selectAllCheckbox"></th>
+                                <th class="col-num">#</th>
+                                <th class="col-key">Key Identifier</th>
+                                <th class="col-type">Data Type</th>
+                                <th class="col-preview">Value Preview</th>
+                                <th class="col-size">Size / Length</th>
+                                <th class="col-ttl">Time-To-Live (TTL)</th>
+                                <th class="col-actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="datasheetBody">
+                            <tr>
+                                <td colspan="8" class="table-loading">
+                                    <div class="loading-state">
+                                        <div class="studio-spinner"></div>
+                                        <span>Querying Redis database...</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            <!-- Datasheet Grid Table -->
-            <div class="grid-container">
-                <table class="datasheet-table" id="datasheetTable">
-                    <thead>
-                        <tr>
-                            <th class="col-checkbox"><input type="checkbox" id="selectAllCheckbox"></th>
-                            <th class="col-num">#</th>
-                            <th class="col-key">Key Identifier</th>
-                            <th class="col-type">Data Type</th>
-                            <th class="col-preview">Value Preview</th>
-                            <th class="col-size">Size / Length</th>
-                            <th class="col-ttl">Time-To-Live (TTL)</th>
-                            <th class="col-actions">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="datasheetBody">
-                        <tr>
-                            <td colspan="8" class="table-loading">
-                                <div class="loading-state">
-                                    <div class="studio-spinner"></div>
-                                    <span>Querying Redis database...</span>
+            <!-- Pane 2: Cloud REST API & RLS Security -->
+            <div class="studio-pane" id="pane-cloud-api" style="display: none;">
+                <div class="pane-content-scroll">
+                    <!-- Banner -->
+                    <div class="pane-header-banner green-accent">
+                        <div class="banner-left">
+                            <span class="banner-badge green">
+                                <iconify-icon icon="lucide:shield-check" width="13"></iconify-icon>
+                                Cloud Edge API &amp; RLS Active
+                            </span>
+                            <h2 class="banner-title">Serverless HTTP REST API &amp; Key-Level Security (RLS)</h2>
+                            <p class="banner-desc">
+                                Execute low-latency KV commands over standard HTTP REST endpoints with Bearer Token authentication. Fine-grained Access Control Lists (ACL) and Row/Key-Level Security (RLS) patterns isolate and safeguard tenant namespaces.
+                            </p>
+                        </div>
+                        <div>
+                            <button class="btn btn-secondary btn-sm" id="refreshAclBtn">
+                                <iconify-icon icon="lucide:rotate-cw" width="14"></iconify-icon>
+                                Reload Accounts
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="cloud-api-grid">
+                        <!-- Left: Service Accounts & Tokens -->
+                        <div class="studio-card">
+                            <div class="card-header-bar">
+                                <span class="card-header-title">
+                                    <iconify-icon icon="lucide:users" width="16" style="color: #38bdf8;"></iconify-icon>
+                                    Configured Accounts &amp; Tokens
+                                </span>
+                                <span class="badge-type" style="font-size: 0.65rem;">ACL Engine</span>
+                            </div>
+                            <div class="card-body" id="aclUserListContainer">
+                                <div class="table-loading">Loading ACL users...</div>
+                            </div>
+                        </div>
+
+                        <!-- Right: Interactive Cloud API Explorer -->
+                        <div class="studio-card">
+                            <div class="card-header-bar">
+                                <span class="card-header-title">
+                                    <iconify-icon icon="lucide:play-circle" width="16" style="color: #34d399;"></iconify-icon>
+                                    Interactive Cloud API Request Playground
+                                </span>
+                                <span class="badge-type" style="font-size: 0.65rem;">HTTP REST /v1/</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="studio-form-group">
+                                    <label>Select API Endpoint</label>
+                                    <select id="apiEndpointSelect" class="studio-input">
+                                        <option value="GET_KEY">GET /v1/get/:key (Retrieve String or JSON)</option>
+                                        <option value="SET_KEY">POST /v1/set (Set Key &amp; Optional TTL)</option>
+                                        <option value="LPUSH">POST /v1/lpush (Prepend values to List)</option>
+                                        <option value="LRANGE">GET /v1/lrange/:key (Fetch slice of List)</option>
+                                        <option value="HSET">POST /v1/hset (Set Hash Fields)</option>
+                                        <option value="HGETALL">GET /v1/hgetall/:key (Fetch all Hash fields)</option>
+                                        <option value="DEL_KEY">DELETE /v1/del/:key (Delete Key)</option>
+                                        <option value="PIPELINE">POST /v1/pipeline (Batch multi-command execution)</option>
+                                        <option value="RAW_CMD">POST /v1/command (Raw Redis command payload)</option>
+                                    </select>
                                 </div>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+
+                                <div class="tester-form-row">
+                                    <div class="studio-form-group">
+                                        <label>Auth Token</label>
+                                        <select id="apiTokenSelect" class="studio-input">
+                                            <option value="tok_admin_live_secret">admin (tok_admin...)</option>
+                                            <option value="tok_app_tenant">tenant-app (tok_app...)</option>
+                                            <option value="tok_ro_public">readonly (tok_ro...)</option>
+                                            <option value="custom">Custom Token...</option>
+                                        </select>
+                                    </div>
+                                    <div class="studio-form-group" id="apiKeyInputGroup">
+                                        <label>Target Key</label>
+                                        <input type="text" id="apiTargetKey" class="studio-input" value="app:user:101" placeholder="e.g. app:session:xyz or greetings">
+                                    </div>
+                                    <div class="studio-form-group" style="justify-content: flex-end;">
+                                        <button class="btn btn-primary" id="apiExecuteBtn" style="height: 38px;">
+                                            <iconify-icon icon="lucide:send" width="14"></iconify-icon>
+                                            Send
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="studio-form-group" id="apiCustomTokenGroup" style="display: none;">
+                                    <label>Custom Bearer Token</label>
+                                    <input type="text" id="apiCustomTokenInput" class="studio-input" placeholder="Paste custom Bearer token...">
+                                </div>
+
+                                <div class="studio-form-group" id="apiBodyGroup">
+                                    <label>Request JSON Payload</label>
+                                    <textarea id="apiRequestBody" class="studio-input textarea" rows="4" placeholder="{ ... }"></textarea>
+                                </div>
+
+                                <div class="studio-form-group">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <label>Generated cURL Command</label>
+                                        <button class="btn-icon-copy" id="copyCurlBtn" title="Copy cURL to clipboard">
+                                            <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
+                                            <span style="font-size: 0.72rem; margin-left: 0.25rem;">Copy cURL</span>
+                                        </button>
+                                    </div>
+                                    <div class="curl-snippet-box">
+                                        <span class="curl-text" id="apiCurlSnippet">curl -H "Authorization: Bearer tok_admin_live_secret" http://localhost:8080/v1/get/app:user:101</span>
+                                    </div>
+                                </div>
+
+                                <div class="studio-form-group">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <label>Response Output</label>
+                                        <div id="apiResponseStatus" style="font-size: 0.75rem; font-weight: 700;">-</div>
+                                    </div>
+                                    <div class="code-output-box" id="apiResponseBox">// Click 'Send' to dispatch request...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pane 3: Virtual Thread Benchmark & Stress Engine -->
+            <div class="studio-pane" id="pane-benchmark" style="display: none;">
+                <div class="pane-content-scroll">
+                    <!-- Banner -->
+                    <div class="pane-header-banner amber-accent">
+                        <div class="banner-left">
+                            <span class="banner-badge amber">
+                                <iconify-icon icon="lucide:gauge" width="13"></iconify-icon>
+                                Java 25 Loom Virtual Threads
+                            </span>
+                            <h2 class="banner-title">Virtual Thread Concurrency Benchmark</h2>
+                            <p class="banner-desc">
+                                Stress test Redis core throughput and pipeline latency using thousands of non-blocking Java 25 Virtual Threads. Evaluates pipelined SET &amp; GET transactions with full percentile breakdown (P50, P90, P99).
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Controls Bar -->
+                    <div class="bench-controls-bar">
+                        <div class="bench-options-group">
+                            <div class="bench-opt-item">
+                                <label>Total Operations</label>
+                                <select id="benchOpsSelect" class="studio-select">
+                                    <option value="10000">10,000 Operations</option>
+                                    <option value="25000" selected>25,000 Operations</option>
+                                    <option value="50000">50,000 Operations</option>
+                                    <option value="100000">100,000 Operations</option>
+                                </select>
+                            </div>
+                            <div class="bench-opt-item">
+                                <label>Concurrency (Virtual Threads)</label>
+                                <select id="benchConcurrencySelect" class="studio-select">
+                                    <option value="10">10 Virtual Threads</option>
+                                    <option value="25">25 Virtual Threads</option>
+                                    <option value="50" selected>50 Virtual Threads</option>
+                                    <option value="100">100 Virtual Threads</option>
+                                    <option value="200">200 Virtual Threads</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div>
+                            <button class="btn btn-primary" id="startBenchmarkBtn" style="padding: 0.65rem 1.4rem;">
+                                <iconify-icon icon="lucide:zap" width="16"></iconify-icon>
+                                Start Stress Test
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Metrics Grid -->
+                    <div class="bench-hero-grid">
+                        <div class="bench-stat-card hero">
+                            <div class="stat-head">
+                                <span>THROUGHPUT</span>
+                                <iconify-icon icon="lucide:zap" width="18" style="color: #34d399;"></iconify-icon>
+                            </div>
+                            <div class="stat-num" id="benchOpsPerSec">0</div>
+                            <div class="stat-sub">Operations per Second</div>
+                        </div>
+
+                        <div class="bench-stat-card">
+                            <div class="stat-head">
+                                <span>TOTAL DURATION</span>
+                                <iconify-icon icon="lucide:clock" width="18" style="color: var(--accent-blue);"></iconify-icon>
+                            </div>
+                            <div class="stat-num" id="benchDuration">0 ms</div>
+                            <div class="stat-sub">End-to-end execution time</div>
+                        </div>
+
+                        <div class="bench-stat-card">
+                            <div class="stat-head">
+                                <span>COMPLETED OPS</span>
+                                <iconify-icon icon="lucide:check-circle-2" width="18" style="color: var(--accent-purple);"></iconify-icon>
+                            </div>
+                            <div class="stat-num" id="benchCompletedOps">0</div>
+                            <div class="stat-sub">50% SET / 50% GET pipelined</div>
+                        </div>
+
+                        <div class="bench-stat-card">
+                            <div class="stat-head">
+                                <span>THREAD MODEL</span>
+                                <iconify-icon icon="lucide:cpu" width="18" style="color: var(--accent-amber);"></iconify-icon>
+                            </div>
+                            <div class="stat-num" id="benchConcurrencyLabel">50 Threads</div>
+                            <div class="stat-sub">Non-blocking Virtual Threads</div>
+                        </div>
+                    </div>
+
+                    <!-- Latency Distribution Card -->
+                    <div class="studio-card">
+                        <div class="card-header-bar">
+                            <span class="card-header-title">
+                                <iconify-icon icon="lucide:bar-chart-2" width="16" style="color: #38bdf8;"></iconify-icon>
+                                Latency Distribution Breakdown (Percentiles)
+                            </span>
+                            <span class="badge-type" style="font-size: 0.65rem;">Millisecond Precision</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="latency-grid">
+                                <div class="latency-item">
+                                    <span class="latency-tag">P50 (Median)</span>
+                                    <span class="latency-val" id="benchP50">-</span>
+                                    <span class="latency-sub">50% requests faster</span>
+                                </div>
+                                <div class="latency-item">
+                                    <span class="latency-tag">P90</span>
+                                    <span class="latency-val" id="benchP90">-</span>
+                                    <span class="latency-sub">90% requests faster</span>
+                                </div>
+                                <div class="latency-item">
+                                    <span class="latency-tag" style="color: #ff4757;">P99 (Tail)</span>
+                                    <span class="latency-val" id="benchP99" style="color: #ff4757;">-</span>
+                                    <span class="latency-sub">99% requests faster</span>
+                                </div>
+                                <div class="latency-item">
+                                    <span class="latency-tag" style="color: var(--accent-green);">Min Latency</span>
+                                    <span class="latency-val" id="benchMin" style="color: var(--accent-green);">-</span>
+                                    <span class="latency-sub">Fastest recorded op</span>
+                                </div>
+                                <div class="latency-item">
+                                    <span class="latency-tag" style="color: var(--accent-amber);">Max Latency</span>
+                                    <span class="latency-val" id="benchMax" style="color: var(--accent-amber);">-</span>
+                                    <span class="latency-sub">Slowest recorded op</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Bottom Dockable Web CLI Drawer -->
