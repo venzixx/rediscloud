@@ -3,8 +3,12 @@ package com.myredis.web;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myredis.commands.CommandRegistry;
 import com.myredis.protocol.RespMessage;
+import com.myredis.security.Account;
+import com.myredis.security.AccountManager;
 import com.myredis.security.AclEngine;
+import com.myredis.security.Session;
 import com.myredis.security.User;
+import com.myredis.storage.DatabaseInstance;
 import com.myredis.storage.StorageEngine;
 import com.myredis.storage.VirtualDatabaseManager;
 import com.sun.net.httpserver.HttpExchange;
@@ -18,8 +22,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
- * REST API handler for the Redis Web Dashboard and management console.
- * Supports multi-tenant virtual database selection and tenant account provisioning.
+ * REST API handler for the Redis Cloud Platform & Database Studio.
+ * Supports Email/Google Sign-In, multi-database creation, sharing with collaborators,
+ * and permission enforcement.
  */
 public class ApiHandler implements HttpHandler {
 
@@ -27,22 +32,30 @@ public class ApiHandler implements HttpHandler {
     private final CommandRegistry registry;
     private final AclEngine aclEngine;
     private final VirtualDatabaseManager virtualDbManager;
+    private final AccountManager accountManager;
     private final int redisPort;
     private final int webPort;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public ApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine,
-                      VirtualDatabaseManager virtualDbManager, int redisPort, int webPort) {
+                      VirtualDatabaseManager virtualDbManager, AccountManager accountManager,
+                      int redisPort, int webPort) {
         this.storage = storage;
         this.registry = registry;
         this.aclEngine = aclEngine;
         this.virtualDbManager = virtualDbManager;
+        this.accountManager = accountManager;
         this.redisPort = redisPort > 0 ? redisPort : 6379;
         this.webPort = webPort > 0 ? webPort : 8080;
     }
 
+    public ApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine,
+                      VirtualDatabaseManager virtualDbManager, int redisPort, int webPort) {
+        this(storage, registry, aclEngine, virtualDbManager, null, redisPort, webPort);
+    }
+
     public ApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine) {
-        this(storage, registry, aclEngine, null, 6379, 8080);
+        this(storage, registry, aclEngine, null, null, 6379, 8080);
     }
 
     @Override
@@ -53,7 +66,7 @@ public class ApiHandler implements HttpHandler {
 
         // Enable CORS for frontend development
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, DELETE, PUT, OPTIONS");
         exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
         if ("OPTIONS".equalsIgnoreCase(method)) {
@@ -62,7 +75,41 @@ public class ApiHandler implements HttpHandler {
         }
 
         try {
-            if (path.equals("/api/stats") && "GET".equals(method)) {
+            // Authentication & User Identity Routes
+            if (path.equals("/api/auth/register") && "POST".equals(method)) {
+                handleAuthRegister(exchange);
+            } else if (path.equals("/api/auth/login") && "POST".equals(method)) {
+                handleAuthLogin(exchange);
+            } else if (path.equals("/api/auth/google") && "POST".equals(method)) {
+                handleAuthGoogle(exchange);
+            } else if (path.equals("/api/auth/me") && "GET".equals(method)) {
+                handleAuthMe(exchange);
+            } else if (path.equals("/api/auth/logout") && "POST".equals(method)) {
+                handleAuthLogout(exchange);
+            } else if (path.equals("/api/auth/demo-users") && "GET".equals(method)) {
+                handleAuthDemoUsers(exchange);
+
+            // Database Management & Sharing Routes
+            } else if (path.equals("/api/databases") && "GET".equals(method)) {
+                handleListDatabases(exchange);
+            } else if (path.equals("/api/databases") && "POST".equals(method)) {
+                handleCreateDatabase(exchange);
+            } else if (path.equals("/api/databases/share") && "POST".equals(method)) {
+                handleShareDatabase(exchange);
+            } else if (path.equals("/api/databases/unshare") && "POST".equals(method)) {
+                handleUnshareDatabase(exchange);
+            } else if (path.equals("/api/databases/share-link") && "POST".equals(method)) {
+                handleShareLink(exchange);
+            } else if (path.equals("/api/databases/join") && "POST".equals(method)) {
+                handleJoinShareLink(exchange);
+            } else if (path.startsWith("/api/databases/") && "DELETE".equals(method)) {
+                handleDeleteDatabase(exchange, path.substring("/api/databases/".length()));
+            } else if (path.equals("/api/database") && "DELETE".equals(method)) {
+                Map<String, String> qp = parseQueryParams(exchange.getRequestURI().getQuery());
+                handleDeleteDatabase(exchange, qp.get("id"));
+
+            // Core Redis Data & Telemetry Operations
+            } else if (path.equals("/api/stats") && "GET".equals(method)) {
                 handleStats(exchange);
             } else if (path.equals("/api/keys") && "GET".equals(method)) {
                 handleListKeys(exchange);
@@ -83,11 +130,7 @@ public class ApiHandler implements HttpHandler {
             } else if (path.equals("/api/acl") && "GET".equals(method)) {
                 handleAclList(exchange);
             } else if (path.equals("/api/tenants") && "GET".equals(method)) {
-                handleListTenants(exchange);
-            } else if (path.equals("/api/tenants") && "POST".equals(method)) {
-                handleCreateTenant(exchange);
-            } else if (path.equals("/api/auth/register") && "POST".equals(method)) {
-                handleCreateTenant(exchange);
+                handleListDatabases(exchange); // Aliased for backward compatibility
             } else if (path.equals("/api/benchmark") && "POST".equals(method)) {
                 handleBenchmark(exchange);
             } else if (path.equals("/api/flush") && "POST".equals(method)) {
@@ -95,20 +138,361 @@ public class ApiHandler implements HttpHandler {
             } else {
                 sendJson(exchange, 404, Map.of("error", "Endpoint not found: " + path));
             }
+        } catch (SecurityException se) {
+            sendJson(exchange, 403, Map.of("error", se.getMessage()));
+        } catch (IllegalArgumentException iae) {
+            sendJson(exchange, 400, Map.of("error", iae.getMessage()));
         } catch (Exception e) {
             sendJson(exchange, 500, Map.of("error", e.getMessage() != null ? e.getMessage() : "Internal server error"));
         }
     }
 
+    // ==========================================
+    // User Identity & Authentication Handlers
+    // ==========================================
+
+    @SuppressWarnings("unchecked")
+    private void handleAuthRegister(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        String email = (String) req.get("email");
+        String password = (String) req.get("password");
+        String name = (String) req.get("name");
+
+        if (accountManager == null) {
+            sendJson(exchange, 500, Map.of("error", "AccountManager not configured"));
+            return;
+        }
+
+        Account account = accountManager.register(email, password, name);
+        Session session = accountManager.createSession(account);
+
+        // Automatically create a default database for the new user!
+        if (virtualDbManager != null) {
+            virtualDbManager.createDatabase(account.getEmail(), "My First Cache");
+        }
+
+        sendJson(exchange, 201, Map.of(
+                "success", true,
+                "token", session.getToken(),
+                "message", "Account registered successfully",
+                "user", account.toSafeMap(),
+                "session", session.toMap()
+        ));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleAuthLogin(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        String email = (String) req.get("email");
+        String password = (String) req.get("password");
+
+        if (accountManager == null) {
+            sendJson(exchange, 500, Map.of("error", "AccountManager not configured"));
+            return;
+        }
+
+        Session session = accountManager.login(email, password);
+        if (session == null) {
+            sendJson(exchange, 401, Map.of("error", "Invalid email or password"));
+            return;
+        }
+
+        Account account = accountManager.getAccountById(session.getUserId());
+        sendJson(exchange, 200, Map.of(
+                "success", true,
+                "token", session.getToken(),
+                "user", account.toSafeMap(),
+                "session", session.toMap()
+        ));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleAuthGoogle(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        String email = (String) req.get("email");
+        String name = (String) req.get("name");
+        String avatar = (String) req.get("avatar");
+
+        if (accountManager == null) {
+            sendJson(exchange, 500, Map.of("error", "AccountManager not configured"));
+            return;
+        }
+
+        if (email == null || email.isBlank()) {
+            sendJson(exchange, 400, Map.of("error", "Google email is required"));
+            return;
+        }
+
+        Session session = accountManager.loginWithGoogle(email, name, avatar);
+        Account account = accountManager.getAccountById(session.getUserId());
+
+        // Provision a database if the user has none
+        if (virtualDbManager != null && virtualDbManager.listDatabasesForUser(account.getEmail()).isEmpty()) {
+            virtualDbManager.createDatabase(account.getEmail(), "Google Cloud Cache");
+        }
+
+        sendJson(exchange, 200, Map.of(
+                "success", true,
+                "token", session.getToken(),
+                "message", "Authenticated via Google Sign-In",
+                "user", account.toSafeMap(),
+                "session", session.toMap()
+        ));
+    }
+
+    private void handleAuthMe(HttpExchange exchange) throws IOException {
+        Account user = resolveRequestingUser(exchange);
+        if (user == null) {
+            sendJson(exchange, 401, Map.of("authenticated", false, "error", "No active session"));
+            return;
+        }
+        sendJson(exchange, 200, Map.of(
+                "authenticated", true,
+                "user", user.toSafeMap()
+        ));
+    }
+
+    private void handleAuthLogout(HttpExchange exchange) throws IOException {
+        String authHeader = exchange.getRequestHeaders().getFirst("Authorization");
+        if (accountManager != null && authHeader != null) {
+            accountManager.logout(authHeader);
+        }
+        sendJson(exchange, 200, Map.of("success", true, "message", "Logged out successfully"));
+    }
+
+    private void handleAuthDemoUsers(HttpExchange exchange) throws IOException {
+        List<Map<String, Object>> list = new ArrayList<>();
+        if (accountManager != null) {
+            for (Account acc : accountManager.listAccounts()) {
+                list.add(acc.toSafeMap());
+            }
+        }
+        sendJson(exchange, 200, Map.of("users", list));
+    }
+
+    // ==========================================
+    // Multi-Database Creation & Sharing Handlers
+    // ==========================================
+
+    private void handleListDatabases(HttpExchange exchange) throws IOException {
+        String host = resolveHost(exchange);
+        Account user = resolveRequestingUser(exchange);
+        String userEmail = user != null ? user.getEmail() : "alex@rediscloud.dev";
+
+        if (virtualDbManager == null) {
+            sendJson(exchange, 200, Map.of("myDatabases", List.of(), "sharedWithMe", List.of(), "all", List.of()));
+            return;
+        }
+
+        Map<String, List<DatabaseInstance>> cat = virtualDbManager.getCategorizedDatabases(userEmail);
+        List<Map<String, Object>> myDbs = cat.get("myDatabases").stream().map(d -> d.toMap(host, redisPort, webPort, userEmail)).toList();
+        List<Map<String, Object>> shared = cat.get("sharedWithMe").stream().map(d -> d.toMap(host, redisPort, webPort, userEmail)).toList();
+        List<Map<String, Object>> allList = virtualDbManager.listDatabases();
+
+        sendJson(exchange, 200, Map.of(
+                "user", user != null ? user.toSafeMap() : Map.of("email", userEmail),
+                "myDatabases", myDbs,
+                "sharedWithMe", shared,
+                "databases", allList
+        ));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleCreateDatabase(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        String name = (String) req.get("name");
+        String customId = (String) req.get("id");
+        String customPass = (String) req.get("password");
+
+        if (name == null || name.isBlank()) {
+            sendJson(exchange, 400, Map.of("error", "Database name is required"));
+            return;
+        }
+
+        Account user = resolveRequestingUser(exchange);
+        String ownerEmail = user != null ? user.getEmail() : "alex@rediscloud.dev";
+
+        DatabaseInstance db = virtualDbManager.createDatabase(ownerEmail, name, customId, customPass);
+        String host = resolveHost(exchange);
+
+        sendJson(exchange, 201, Map.of(
+                "success", true,
+                "message", "Database '" + db.getName() + "' created successfully",
+                "database", db.toMap(host, redisPort, webPort, ownerEmail)
+        ));
+    }
+
+    private void handleDeleteDatabase(HttpExchange exchange, String dbId) throws IOException {
+        if (dbId == null || dbId.isBlank()) {
+            sendJson(exchange, 400, Map.of("error", "Database ID is required"));
+            return;
+        }
+        Account user = resolveRequestingUser(exchange);
+        String userEmail = user != null ? user.getEmail() : null;
+
+        try {
+            boolean deleted = virtualDbManager.deleteDatabase(dbId, userEmail);
+            if (deleted) {
+                sendJson(exchange, 200, Map.of("success", true, "message", "Database deleted successfully"));
+            } else {
+                sendJson(exchange, 404, Map.of("error", "Database not found"));
+            }
+        } catch (SecurityException se) {
+            sendJson(exchange, 403, Map.of("error", se.getMessage()));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleShareDatabase(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        String dbId = (String) (req.get("dbId") != null ? req.get("dbId") : req.get("id"));
+        String targetEmail = (String) (req.get("targetEmail") != null ? req.get("targetEmail") : req.get("email"));
+        String role = (String) req.getOrDefault("role", "EDITOR");
+
+        if (dbId == null || targetEmail == null || targetEmail.isBlank()) {
+            sendJson(exchange, 400, Map.of("error", "Both database 'id' and 'email' are required"));
+            return;
+        }
+
+        Account user = resolveRequestingUser(exchange);
+        String requesterEmail = user != null ? user.getEmail() : null;
+
+        virtualDbManager.shareDatabase(dbId, requesterEmail, targetEmail, role);
+        DatabaseInstance db = virtualDbManager.getDatabase(dbId);
+        String host = resolveHost(exchange);
+
+        sendJson(exchange, 200, Map.of(
+                "success", true,
+                "message", "Database '" + db.getName() + "' shared with " + targetEmail + " as " + role,
+                "database", db.toMap(host, redisPort, webPort, requesterEmail)
+        ));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleUnshareDatabase(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        String dbId = (String) (req.get("dbId") != null ? req.get("dbId") : req.get("id"));
+        String targetEmail = (String) (req.get("targetEmail") != null ? req.get("targetEmail") : req.get("email"));
+
+        if (dbId == null || targetEmail == null) {
+            sendJson(exchange, 400, Map.of("error", "Both database 'id' and 'email' are required"));
+            return;
+        }
+
+        Account user = resolveRequestingUser(exchange);
+        String requesterEmail = user != null ? user.getEmail() : null;
+
+        virtualDbManager.unshareDatabase(dbId, requesterEmail, targetEmail);
+        sendJson(exchange, 200, Map.of("success", true, "message", "Collaborator removed successfully"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleShareLink(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        String dbId = (String) (req.get("dbId") != null ? req.get("dbId") : req.get("id"));
+        Boolean enabled = (Boolean) req.getOrDefault("enabled", true);
+        String role = (String) req.getOrDefault("role", "VIEWER");
+
+        DatabaseInstance db = virtualDbManager.getDatabase(dbId);
+        if (db == null) {
+            sendJson(exchange, 404, Map.of("error", "Database not found"));
+            return;
+        }
+
+        Account user = resolveRequestingUser(exchange);
+        if (user != null && !db.canAdmin(user.getEmail())) {
+            sendJson(exchange, 403, Map.of("error", "Only the owner can configure share links"));
+            return;
+        }
+
+        db.setShareLinkEnabled(enabled, role);
+        String host = resolveHost(exchange);
+
+        sendJson(exchange, 200, Map.of(
+                "success", true,
+                "token", db.getShareLinkToken(),
+                "shareLinkEnabled", db.isShareLinkEnabled(),
+                "shareLinkToken", db.getShareLinkToken(),
+                "shareLinkUrl", "http://" + host + ":" + webPort + "/#join=" + db.getShareLinkToken()
+        ));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleJoinShareLink(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        String token = (String) req.get("token");
+
+        Account user = resolveRequestingUser(exchange);
+        if (user == null) {
+            sendJson(exchange, 401, Map.of("error", "Please sign in before joining a shared database"));
+            return;
+        }
+
+        DatabaseInstance db = virtualDbManager.joinByShareLink(token, user.getEmail());
+        if (db == null) {
+            sendJson(exchange, 404, Map.of("error", "Invalid or expired share link"));
+            return;
+        }
+
+        String host = resolveHost(exchange);
+        sendJson(exchange, 200, Map.of(
+                "success", true,
+                "message", "Successfully joined database '" + db.getName() + "'",
+                "database", db.toMap(host, redisPort, webPort, user.getEmail())
+        ));
+    }
+
+    // ==========================================
+    // Helpers & Permission Enforcement
+    // ==========================================
+
+    private Account resolveRequestingUser(HttpExchange exchange) {
+        if (accountManager == null) return null;
+
+        String auth = exchange.getRequestHeaders().getFirst("Authorization");
+        if (auth != null && !auth.isBlank()) {
+            return accountManager.getAccountForSession(auth);
+        }
+
+        Map<String, String> qp = parseQueryParams(exchange.getRequestURI().getQuery());
+        if (qp.containsKey("session")) {
+            return accountManager.getAccountForSession(qp.get("session"));
+        }
+        if (qp.containsKey("userEmail")) {
+            return accountManager.getAccountByEmail(qp.get("userEmail"));
+        }
+
+        // Demo user default fallback for unauthenticated development
+        return accountManager.getAccountByEmail("alex@rediscloud.dev");
+    }
+
+    private void checkWritePermission(String dbId, Account user) {
+        if (dbId == null || dbId.isBlank() || dbId.equals("default") || dbId.equals("db0")) return;
+        if (virtualDbManager == null || user == null) return;
+
+        DatabaseInstance db = virtualDbManager.getDatabase(dbId);
+        if (db != null && !db.canWrite(user.getEmail())) {
+            throw new SecurityException("Permission Denied: You have VIEWER (read-only) permissions on database '" + db.getName() + "'");
+        }
+    }
+
     private StorageEngine resolveStorage(Map<String, String> queryParams) {
         if (virtualDbManager == null) return storage;
-        String tenant = queryParams.get("tenant");
-        if (tenant != null && !tenant.isBlank()) {
-            return virtualDbManager.getStorageForUser(tenant);
-        }
         String db = queryParams.get("db");
         if (db != null && !db.isBlank()) {
             return virtualDbManager.getStorageByDbName(db);
+        }
+        String tenant = queryParams.get("tenant");
+        if (tenant != null && !tenant.isBlank()) {
+            return virtualDbManager.getStorageForUser(tenant);
         }
         return storage;
     }
@@ -116,25 +500,38 @@ public class ApiHandler implements HttpHandler {
     private StorageEngine resolveStorage(Map<String, Object> req, Map<String, String> queryParams) {
         if (virtualDbManager == null) return storage;
         if (req != null) {
-            if (req.containsKey("tenant") && req.get("tenant") != null) {
-                return virtualDbManager.getStorageForUser(String.valueOf(req.get("tenant")));
-            }
             if (req.containsKey("db") && req.get("db") != null) {
                 return virtualDbManager.getStorageByDbName(String.valueOf(req.get("db")));
+            }
+            if (req.containsKey("tenant") && req.get("tenant") != null) {
+                return virtualDbManager.getStorageForUser(String.valueOf(req.get("tenant")));
             }
         }
         return resolveStorage(queryParams);
     }
 
-    private String getActiveDbName(Map<String, String> qp) {
-        if (qp.containsKey("tenant") && !qp.get("tenant").isBlank()) {
-            return "vdb_" + qp.get("tenant").toLowerCase();
+    private String getTargetDbId(Map<String, Object> req, Map<String, String> qp) {
+        if (req != null && req.containsKey("db") && req.get("db") != null) {
+            return String.valueOf(req.get("db"));
         }
+        return qp.get("db");
+    }
+
+    private String getActiveDbName(Map<String, String> qp) {
         if (qp.containsKey("db") && !qp.get("db").isBlank()) {
-            return qp.get("db");
+            String dbId = qp.get("db");
+            if (virtualDbManager != null) {
+                DatabaseInstance db = virtualDbManager.getDatabase(dbId);
+                if (db != null) return db.getName() + " (" + db.getId() + ")";
+            }
+            return dbId;
         }
         return "db0";
     }
+
+    // ==========================================
+    // Core Redis Data & Telemetry Handlers
+    // ==========================================
 
     private void handleStats(HttpExchange exchange) throws IOException {
         Map<String, String> qp = parseQueryParams(exchange.getRequestURI().getQuery());
@@ -143,54 +540,6 @@ public class ApiHandler implements HttpHandler {
         stats.put("activeDb", getActiveDbName(qp));
         stats.put("databases", virtualDbManager != null ? virtualDbManager.listDatabases() : List.of());
         sendJson(exchange, 200, stats);
-    }
-
-    private void handleListTenants(HttpExchange exchange) throws IOException {
-        String host = resolveHost(exchange);
-        List<Map<String, Object>> users = aclEngine != null ? aclEngine.listUsersWithUrls(host, redisPort, webPort) : Collections.emptyList();
-        if (virtualDbManager != null) {
-            for (Map<String, Object> uMap : users) {
-                String username = (String) uMap.get("username");
-                StorageEngine se = virtualDbManager.getStorageForUser(username);
-                uMap.put("keyCount", se.dbSize());
-                uMap.put("memoryBytes", se.getMetrics().getUsedMemoryBytes());
-                uMap.put("memoryHuman", se.getMetrics().getUsedMemoryHuman());
-            }
-        }
-        List<Map<String, Object>> dbs = virtualDbManager != null ? virtualDbManager.listDatabases() : List.of();
-        sendJson(exchange, 200, Map.of(
-                "tenants", users,
-                "databases", dbs
-        ));
-    }
-
-    @SuppressWarnings("unchecked")
-    private void handleCreateTenant(HttpExchange exchange) throws IOException {
-        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-        Map<String, Object> req = body.isBlank() ? Collections.emptyMap() : mapper.readValue(body, Map.class);
-        String username = (String) req.get("username");
-        String password = (String) req.get("password");
-        String token = (String) req.get("token");
-
-        if (username == null || username.trim().isEmpty()) {
-            sendJson(exchange, 400, Map.of("error", "Username is required"));
-            return;
-        }
-
-        try {
-            User u = aclEngine.createTenantAccount(username, password, token);
-            if (virtualDbManager != null) {
-                virtualDbManager.getStorageForUser(u.getUsername());
-            }
-            String host = resolveHost(exchange);
-            sendJson(exchange, 201, Map.of(
-                    "success", true,
-                    "message", "Tenant account provisioned with virtual database " + u.getVirtualDbName(),
-                    "user", u.toMap(host, redisPort, webPort)
-            ));
-        } catch (IllegalArgumentException iae) {
-            sendJson(exchange, 400, Map.of("error", iae.getMessage()));
-        }
     }
 
     private void handleListKeys(HttpExchange exchange) throws IOException {
@@ -235,8 +584,12 @@ public class ApiHandler implements HttpHandler {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Map<String, Object> request = mapper.readValue(body, Map.class);
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
-        StorageEngine target = resolveStorage(request, queryParams);
 
+        Account user = resolveRequestingUser(exchange);
+        String targetDbId = getTargetDbId(request, queryParams);
+        checkWritePermission(targetDbId, user);
+
+        StorageEngine target = resolveStorage(request, queryParams);
         String key = (String) request.get("key");
         String type = (String) request.getOrDefault("type", "string");
         Object valObj = request.get("value");
@@ -301,6 +654,10 @@ public class ApiHandler implements HttpHandler {
 
     private void handleDeleteKey(HttpExchange exchange) throws IOException {
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        Account user = resolveRequestingUser(exchange);
+        String targetDbId = getTargetDbId(null, queryParams);
+        checkWritePermission(targetDbId, user);
+
         StorageEngine target = resolveStorage(queryParams);
         String key = queryParams.get("key");
         if (key == null || key.isBlank()) {
@@ -317,7 +674,6 @@ public class ApiHandler implements HttpHandler {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Map<String, Object> req = mapper.readValue(body, Map.class);
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
-        StorageEngine target = resolveStorage(req, queryParams);
 
         String rawCommand = (String) req.get("command");
         if (rawCommand == null || rawCommand.isBlank()) {
@@ -331,6 +687,16 @@ public class ApiHandler implements HttpHandler {
             return;
         }
 
+        String cmdName = tokens.get(0).toUpperCase();
+        Account user = resolveRequestingUser(exchange);
+        String targetDbId = getTargetDbId(req, queryParams);
+
+        // Check if command is mutating on a read-only database
+        if (!User.isReadOnlyCommand(cmdName)) {
+            checkWritePermission(targetDbId, user);
+        }
+
+        StorageEngine target = resolveStorage(req, queryParams);
         RespMessage resp = registry.execute(tokens, target);
         String formattedOutput = formatRespHuman(resp);
 
@@ -346,8 +712,12 @@ public class ApiHandler implements HttpHandler {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Map<String, Object> req = mapper.readValue(body, Map.class);
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
-        StorageEngine target = resolveStorage(req, queryParams);
 
+        Account user = resolveRequestingUser(exchange);
+        String targetDbId = getTargetDbId(req, queryParams);
+        checkWritePermission(targetDbId, user);
+
+        StorageEngine target = resolveStorage(req, queryParams);
         List<String> keys = (List<String>) req.get("keys");
         if (keys == null || keys.isEmpty()) {
             sendJson(exchange, 400, Map.of("error", "No keys provided for deletion"));
@@ -374,8 +744,12 @@ public class ApiHandler implements HttpHandler {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Map<String, Object> req = mapper.readValue(body, Map.class);
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
-        StorageEngine target = resolveStorage(req, queryParams);
 
+        Account user = resolveRequestingUser(exchange);
+        String targetDbId = getTargetDbId(req, queryParams);
+        checkWritePermission(targetDbId, user);
+
+        StorageEngine target = resolveStorage(req, queryParams);
         List<Map<String, Object>> keys = (List<Map<String, Object>>) req.get("keys");
         if (keys == null) {
             sendJson(exchange, 400, Map.of("error", "Invalid import format: missing 'keys' list"));
@@ -457,6 +831,10 @@ public class ApiHandler implements HttpHandler {
 
     private void handleFlush(HttpExchange exchange) throws IOException {
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
+        Account user = resolveRequestingUser(exchange);
+        String targetDbId = getTargetDbId(null, queryParams);
+        checkWritePermission(targetDbId, user);
+
         StorageEngine target = resolveStorage(queryParams);
         target.flushDb();
         sendJson(exchange, 200, Map.of("success", true, "message", "Database flushed"));

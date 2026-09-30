@@ -1940,4 +1940,605 @@ input:checked + .slider-sm:before { transform: translateX(12px); background-colo
     box-shadow: 0 0 8px var(--accent-green);
 }
 
+/* ==========================================
+   User Profile Dropdown & Active Role Badge
+   ========================================== */
+.db-role-badge-pill {
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.db-role-badge-pill.OWNER {
+    background: rgba(59, 130, 246, 0.18);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+.db-role-badge-pill.EDITOR {
+    background: rgba(52, 211, 153, 0.18);
+    color: #34d399;
+    border-color: rgba(52, 211, 153, 0.4);
+}
+
+.db-role-badge-pill.VIEWER {
+    background: rgba(251, 191, 36, 0.18);
+    color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.4);
+}
+
+.user-profile-menu-container {
+    position: relative;
+    margin-left: 0.4rem;
+}
+
+.user-profile-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #141b2a;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 0.25rem 0.65rem 0.25rem 0.3rem;
+    cursor: pointer;
+    color: var(--text-main);
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+
+.user-profile-btn:hover {
+    border-color: var(--border-light);
+    background: #1c2438;
+}
+
+.user-avatar-img {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #2563eb;
+    object-fit: cover;
+}
+
+.user-dropdown-card {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 260px;
+    background: #101622;
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    padding: 0.75rem;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+}
+
+.user-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.25rem 0.25rem 0.5rem 0.25rem;
+}
+
+.user-dropdown-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: #2563eb;
+    object-fit: cover;
+}
+
+.user-card-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.user-card-email {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 170px;
+}
+
+.user-card-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 0.5rem 0;
+}
+
+.user-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.5rem 0.65rem;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-main);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+
+.user-menu-item:hover {
+    background: #1c2438;
+}
+
+.user-menu-item.text-danger {
+    color: #f87171;
+}
+
+.user-menu-item.text-danger:hover {
+    background: rgba(239, 68, 68, 0.12);
+}
+
+/* ==========================================
+   Database Hub & Tabs
+   ========================================== */
+.db-tabs-bar {
+    display: flex;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.5rem;
+}
+
+.db-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.db-tab-btn:hover {
+    color: var(--text-main);
+    background: #141b2a;
+}
+
+.db-tab-btn.active {
+    background: #1a2235;
+    color: #60a5fa;
+    border-color: rgba(96, 165, 250, 0.3);
+}
+
+.db-tab-badge {
+    padding: 0.1rem 0.45rem;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    font-size: 0.7rem;
+}
+
+.databases-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 1.25rem;
+}
+
+.db-card {
+    background: #101522;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    transition: transform 0.15s, border-color 0.15s;
+}
+
+.db-card:hover {
+    border-color: var(--border-light);
+    transform: translateY(-2px);
+}
+
+.db-card.active-db {
+    border-color: #3b82f6;
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.06) 0%, #101522 100%);
+}
+
+.db-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.db-card-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.db-icon-box {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: rgba(56, 189, 248, 0.12);
+    color: #38bdf8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.db-card-name {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.db-card-id-tag {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.db-card-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background: #090c14;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.65rem;
+    text-align: center;
+}
+
+.db-stat-item .stat-k {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 0.2rem;
+}
+
+.db-stat-item .stat-v {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.db-card-url-box {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.db-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: auto;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+}
+
+/* ==========================================
+   Auth Modal & Google Button
+   ========================================== */
+.auth-modal-dialog {
+    max-width: 440px;
+    width: 100%;
+    background: #0e131e;
+    border: 1px solid var(--border-light);
+    border-radius: 16px;
+    padding: 2rem;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+.auth-header {
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.auth-logo-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-bottom: 1rem;
+}
+
+.auth-brand-name {
+    font-size: 1.2rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.auth-title {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-main);
+    margin-bottom: 0.35rem;
+}
+
+.auth-sub {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.btn-google-sign-in {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: #ffffff;
+    color: #1f2937;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn-google-sign-in:hover {
+    background: #f9fafb;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}
+
+.auth-divider {
+    position: relative;
+    text-align: center;
+    margin: 1.25rem 0;
+}
+
+.auth-divider::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 100%;
+    height: 1px;
+    background: var(--border);
+}
+
+.auth-divider span {
+    position: relative;
+    background: #0e131e;
+    padding: 0 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.auth-tabs {
+    display: flex;
+    background: #141b28;
+    border-radius: 8px;
+    padding: 0.25rem;
+    margin-bottom: 1.25rem;
+}
+
+.auth-tab-btn {
+    flex: 1;
+    padding: 0.5rem;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.auth-tab-btn.active {
+    background: #1f2a3f;
+    color: #ffffff;
+}
+
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.demo-accounts-card {
+    margin-top: 1.5rem;
+    padding: 0.85rem;
+    background: rgba(251, 191, 36, 0.05);
+    border: 1px dashed rgba(251, 191, 36, 0.3);
+    border-radius: 10px;
+}
+
+.demo-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #fbbf24;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.65rem;
+}
+
+.demo-buttons-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.demo-user-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background: #141b2a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s;
+}
+
+.demo-user-btn:hover {
+    border-color: #fbbf24;
+    background: #1a2336;
+}
+
+.demo-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #2563eb;
+}
+
+.demo-info .name {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-main);
+    display: block;
+}
+
+.demo-info .role {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
+/* ==========================================
+   Share Database Modal
+   ========================================== */
+.share-modal-dialog {
+    max-width: 520px;
+}
+
+.share-invite-box {
+    margin-bottom: 1.25rem;
+}
+
+.invite-form-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}
+
+.share-section {
+    margin-bottom: 1.25rem;
+}
+
+.collaborators-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.collaborator-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    background: #141b2a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.collab-left {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.collab-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #3b82f6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.collab-email {
+    font-size: 0.82rem;
+    color: var(--text-main);
+    font-weight: 500;
+}
+
+.collab-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.share-link-box {
+    background: #090d16;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.85rem;
+}
+
+.share-link-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sl-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.sl-toggle-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.sl-toggle-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.sl-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+}
+
+.sl-role-row {
+    margin-top: 0.35rem;
+}
+
+.studio-select-sm {
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    background: #141b2a;
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    font-size: 0.78rem;
+}
+
+
 

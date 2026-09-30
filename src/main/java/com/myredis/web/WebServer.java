@@ -23,10 +23,12 @@ public class WebServer {
     private final CommandRegistry registry;
     private final AclEngine aclEngine;
     private final VirtualDatabaseManager virtualDbManager;
+    private final com.myredis.security.AccountManager accountManager;
     private HttpServer server;
 
     public WebServer(String host, int port, int redisPort, StorageEngine storage,
-                     CommandRegistry registry, AclEngine aclEngine, VirtualDatabaseManager virtualDbManager) {
+                     CommandRegistry registry, AclEngine aclEngine, VirtualDatabaseManager virtualDbManager,
+                     com.myredis.security.AccountManager accountManager) {
         this.host = host;
         this.port = port;
         this.redisPort = redisPort > 0 ? redisPort : 6379;
@@ -34,10 +36,16 @@ public class WebServer {
         this.registry = registry;
         this.aclEngine = aclEngine;
         this.virtualDbManager = virtualDbManager;
+        this.accountManager = accountManager;
+    }
+
+    public WebServer(String host, int port, int redisPort, StorageEngine storage,
+                     CommandRegistry registry, AclEngine aclEngine, VirtualDatabaseManager virtualDbManager) {
+        this(host, port, redisPort, storage, registry, aclEngine, virtualDbManager, null);
     }
 
     public WebServer(String host, int port, StorageEngine storage, CommandRegistry registry, AclEngine aclEngine) {
-        this(host, port, 6379, storage, registry, aclEngine, null);
+        this(host, port, 6379, storage, registry, aclEngine, null, null);
     }
 
     public void start() throws IOException {
@@ -45,7 +53,7 @@ public class WebServer {
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
 
         server.createContext("/v1/", new CloudApiHandler(storage, registry, aclEngine, virtualDbManager, redisPort, port));
-        server.createContext("/api/", new ApiHandler(storage, registry, aclEngine, virtualDbManager, redisPort, port));
+        server.createContext("/api/", new ApiHandler(storage, registry, aclEngine, virtualDbManager, accountManager, redisPort, port));
         server.createContext("/", new StaticResourceHandler());
 
         server.start();

@@ -86,10 +86,10 @@
             <div class="sidebar-section">
                 <span class="section-label">CLOUD &amp; PLATFORM</span>
                 <nav class="nav-tree">
-                    <button class="nav-item" id="navTenantsBtn" data-view-pane="pane-tenants">
-                        <iconify-icon icon="lucide:database" class="nav-icon" width="16" style="color: #60a5fa;"></iconify-icon>
-                        <span class="nav-text">Accounts &amp; Virtual DBs</span>
-                        <span class="nav-count" id="tenantCountBadge">-</span>
+                    <button class="nav-item" id="navDatabasesBtn" data-view-pane="pane-databases">
+                        <iconify-icon icon="lucide:server" class="nav-icon" width="16" style="color: #38bdf8;"></iconify-icon>
+                        <span class="nav-text">Databases &amp; Sharing</span>
+                        <span class="nav-count" id="sbDbsCountBadge">-</span>
                     </button>
                     <button class="nav-item" id="navCloudApiBtn" data-view-pane="pane-cloud-api">
                         <iconify-icon icon="lucide:shield-check" class="nav-icon" width="16" style="color: #34d399;"></iconify-icon>
@@ -148,14 +148,14 @@
                 <div class="breadcrumb-container">
                     <span class="bc-crumb">
                         <iconify-icon icon="lucide:database" width="14" style="vertical-align: middle;"></iconify-icon>
-                        Databases
+                        Database:
                     </span>
-                    <span class="bc-sep">/</span>
                     <div class="vdb-selector-wrapper">
                         <select id="vdbSelect" class="vdb-select-dropdown" title="Select Virtual Database">
                             <option value="default">db0 (Default Root)</option>
                         </select>
                     </div>
+                    <span class="db-role-badge-pill" id="activeDbRoleBadge" title="Your role on active database">OWNER</span>
                     <span class="bc-sep">/</span>
                     <span class="bc-crumb active" id="currentViewBreadcrumb">All Records</span>
                 </div>
@@ -188,6 +188,38 @@
                         <iconify-icon icon="lucide:plus" width="15"></iconify-icon>
                         Insert Record
                     </button>
+
+                    <!-- User Profile Dropdown Menu -->
+                    <div class="user-profile-menu-container">
+                        <button class="user-profile-btn" id="userProfileBtn" title="Account Menu">
+                            <img id="userAvatarImg" src="https://api.dicebear.com/7.x/identicon/svg?seed=Alex" alt="Avatar" class="user-avatar-img">
+                            <span class="user-profile-name" id="userProfileName">Alex Rivera</span>
+                            <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
+                        </button>
+                        <div class="user-dropdown-card" id="userDropdownCard" style="display: none;">
+                            <div class="user-card-head">
+                                <img id="userDropdownAvatar" src="https://api.dicebear.com/7.x/identicon/svg?seed=Alex" class="user-dropdown-avatar">
+                                <div class="user-card-details">
+                                    <div class="user-card-name" id="userDropdownName">Alex Rivera</div>
+                                    <div class="user-card-email" id="userDropdownEmail">alex@rediscloud.dev</div>
+                                </div>
+                            </div>
+                            <div class="user-card-divider"></div>
+                            <button class="user-menu-item" id="menuMyDatabasesBtn">
+                                <iconify-icon icon="lucide:server" width="14" style="color: #38bdf8;"></iconify-icon>
+                                Database Hub &amp; Sharing
+                            </button>
+                            <button class="user-menu-item" id="menuSwitchAccountBtn">
+                                <iconify-icon icon="lucide:users" width="14" style="color: #a78bfa;"></iconify-icon>
+                                Switch Account (Demo)
+                            </button>
+                            <div class="user-card-divider"></div>
+                            <button class="user-menu-item text-danger" id="menuSignOutBtn">
+                                <iconify-icon icon="lucide:log-out" width="14" style="color: #f87171;"></iconify-icon>
+                                Sign Out
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </header>
 
@@ -546,99 +578,69 @@
                 </div>
             </div>
 
-            <!-- Pane 3: Tenant Accounts & Virtual Databases -->
-            <div class="studio-pane" id="pane-tenants" style="display: none;">
+            <!-- Pane 3: User Databases & Sharing Hub -->
+            <div class="studio-pane" id="pane-databases" style="display: none;">
                 <div class="pane-content-scroll">
                     <!-- Banner -->
                     <div class="pane-header-banner blue-accent">
                         <div class="banner-left">
                             <span class="banner-badge blue">
-                                <iconify-icon icon="lucide:database" width="13"></iconify-icon>
-                                Database Virtualization Active
+                                <iconify-icon icon="lucide:server" width="13"></iconify-icon>
+                                Cloud Redis Platform
                             </span>
-                            <h2 class="banner-title">Multi-Tenant Accounts &amp; Virtualized Databases</h2>
+                            <h2 class="banner-title">Cloud Databases &amp; Team Collaboration</h2>
                             <p class="banner-desc">
-                                Create isolated tenant accounts with dedicated in-memory keyspaces (<code class="inline-code">vdb_&lt;username&gt;</code>). Every tenant gets standard Redis connection URLs, token hash URLs for Prisma and ORMs, and secure REST endpoints with zero keyspace collision.
+                                Create isolated Redis database instances, connect via Prisma and ioredis URLs, share databases with teammates by email with role permissions (Editor / Viewer), and access via serverless REST tokens.
                             </p>
                         </div>
                         <div class="banner-actions">
-                            <button class="btn btn-primary btn-sm" id="toggleCreateTenantFormBtn">
-                                <iconify-icon icon="lucide:user-plus" width="14"></iconify-icon>
-                                New Tenant Account
+                            <button class="btn btn-secondary btn-sm" id="refreshDatabasesBtn">
+                                <iconify-icon icon="lucide:rotate-cw" width="14"></iconify-icon>
+                                Refresh
+                            </button>
+                            <button class="btn btn-primary btn-sm" id="openCreateDbModalBtn">
+                                <iconify-icon icon="lucide:plus" width="14"></iconify-icon>
+                                New Database
                             </button>
                         </div>
                     </div>
 
-                    <!-- Quick Account Creator Card (collapsible) -->
-                    <div class="tenant-form-card" id="tenantCreationCard" style="display: none;">
-                        <div class="tf-header">
-                            <div class="tf-title-group">
-                                <iconify-icon icon="lucide:user-plus" width="16" style="color: #60a5fa;"></iconify-icon>
-                                <h4>Provision New Tenant &amp; Dedicated Virtual Database</h4>
-                            </div>
-                            <button class="drawer-btn" id="closeTenantFormBtn"><iconify-icon icon="lucide:x" width="16"></iconify-icon></button>
-                        </div>
-                        <form id="createTenantForm" class="tf-body">
-                            <div class="tf-grid">
-                                <div class="studio-form-group">
-                                    <label>Username / Tenant ID *</label>
-                                    <input type="text" id="tenantUsernameInput" class="studio-input" placeholder="e.g. acme_corp or user_alice" required autocomplete="off">
-                                    <small class="hint">Creates isolated database <span id="vdbPreviewName">vdb_...</span></small>
-                                </div>
-                                <div class="studio-form-group">
-                                    <label>Password (Optional - Auto-generated if blank)</label>
-                                    <input type="text" id="tenantPasswordInput" class="studio-input font-mono" placeholder="Leave blank for secure auto-gen pass">
-                                    <small class="hint">Used in standard Redis connection string</small>
-                                </div>
-                                <div class="studio-form-group">
-                                    <label>API Hash Token (Optional - Auto-generated if blank)</label>
-                                    <input type="text" id="tenantTokenInput" class="studio-input font-mono" placeholder="Leave blank for red_api_...">
-                                    <small class="hint">Single-token URL &amp; REST Bearer authorization</small>
-                                </div>
-                            </div>
-                            <div class="tf-actions">
-                                <button type="button" class="btn btn-secondary btn-sm" id="cancelTenantFormBtn">Cancel</button>
-                                <button type="submit" class="btn btn-primary btn-sm" id="submitTenantFormBtn">
-                                    <iconify-icon icon="lucide:plus" width="14"></iconify-icon>
-                                    Provision Account &amp; Virtual Database
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-
-                    <!-- Tenants Stats Ribbon -->
-                    <div class="benchmark-stats-grid" style="margin-bottom: 1.5rem;">
+                    <!-- Database Hub Stats Ribbon -->
+                    <div class="benchmark-stats-grid" style="margin-bottom: 1.25rem;">
                         <div class="stat-card">
-                            <span class="stat-lbl">Active Virtual Databases</span>
-                            <span class="stat-val highlight" id="statVdbCount">1</span>
-                            <span class="stat-sub">Isolated memory engines</span>
+                            <span class="stat-lbl">My Databases</span>
+                            <span class="stat-val highlight" id="statMyDbsCount">0</span>
+                            <span class="stat-sub">Databases you created &amp; own</span>
                         </div>
                         <div class="stat-card">
-                            <span class="stat-lbl">Registered Accounts</span>
-                            <span class="stat-val" id="statTenantCount">1</span>
-                            <span class="stat-sub">With dedicated credentials</span>
+                            <span class="stat-lbl">Shared With Me</span>
+                            <span class="stat-val" id="statSharedDbsCount" style="color: #a78bfa;">0</span>
+                            <span class="stat-sub">Team databases you collaborate on</span>
                         </div>
                         <div class="stat-card">
-                            <span class="stat-lbl">Active Studio Database</span>
-                            <span class="stat-val" id="statActiveTenantName" style="color: #60a5fa;">db0 (default)</span>
-                            <span class="stat-sub">Currently browsed in Studio</span>
+                            <span class="stat-lbl">Current Active DB</span>
+                            <span class="stat-val" id="statActiveDbName" style="color: #38bdf8;">Production Cache</span>
+                            <span class="stat-sub" id="statActiveDbRoleSub">Role: OWNER</span>
                         </div>
                     </div>
 
-                    <!-- Tenant Cards Container -->
-                    <div class="section-title-row" style="margin-bottom: 0.75rem;">
-                        <h3 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem;">
-                            <iconify-icon icon="lucide:layers" width="16" style="color: #60a5fa;"></iconify-icon>
-                            Tenant Accounts &amp; Virtual Databases
-                        </h3>
-                        <button class="btn btn-secondary btn-sm" id="refreshTenantsBtn">
-                            <iconify-icon icon="lucide:rotate-cw" width="13"></iconify-icon>
-                            Refresh
+                    <!-- Tabs: My Databases vs Shared With Me -->
+                    <div class="db-tabs-bar">
+                        <button class="db-tab-btn active" id="tabMyDbsBtn" data-dbtab="my">
+                            <iconify-icon icon="lucide:database" width="15"></iconify-icon>
+                            <span>My Databases</span>
+                            <span class="db-tab-badge" id="tabMyDbsBadge">0</span>
+                        </button>
+                        <button class="db-tab-btn" id="tabSharedDbsBtn" data-dbtab="shared">
+                            <iconify-icon icon="lucide:users" width="15"></iconify-icon>
+                            <span>Shared With Me</span>
+                            <span class="db-tab-badge" id="tabSharedDbsBadge">0</span>
                         </button>
                     </div>
 
-                    <div class="tenants-cards-grid" id="tenantsCardsContainer">
-                        <!-- Dynamically populated tenant cards -->
+                    <!-- Cards Container -->
+                    <div class="databases-cards-grid" id="databaseCardsContainer">
+                        <!-- Populated dynamically via JS -->
                     </div>
                 </div>
             </div>
@@ -917,6 +919,227 @@
                     <span>Standard Redis RESP Wire Protocol Compatible</span>
                 </div>
                 <button class="btn btn-secondary" id="closeConnectModalBtn2">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Authentication Modal (Google / Email / Demo Switcher) -->
+    <div class="modal-backdrop" id="authModal">
+        <div class="modal-dialog auth-modal-dialog">
+            <div class="auth-header">
+                <div class="auth-logo-row">
+                    <div class="logo-box">
+                        <iconify-icon icon="logos:redis" width="22" height="22"></iconify-icon>
+                    </div>
+                    <span class="auth-brand-name">Redis<span class="red-text">Studio</span> <span class="badge-type" style="background:#2563eb; color:#fff; font-size: 0.65rem;">Cloud</span></span>
+                </div>
+                <h3 class="auth-title">Welcome to Redis Cloud</h3>
+                <p class="auth-sub">Sign in to create databases, collaborate with team members, and get Prisma &amp; ORM connection strings.</p>
+            </div>
+
+            <div class="auth-body">
+                <!-- Google Sign In Button -->
+                <button type="button" class="btn-google-sign-in" id="googleSignInBtn">
+                    <iconify-icon icon="logos:google-icon" width="20"></iconify-icon>
+                    <span>Continue with Google</span>
+                </button>
+
+                <div class="auth-divider">
+                    <span>or continue with email</span>
+                </div>
+
+                <!-- Tabs: Sign In / Create Account -->
+                <div class="auth-tabs">
+                    <button class="auth-tab-btn active" id="authTabLogin" data-authtab="login">Sign In</button>
+                    <button class="auth-tab-btn" id="authTabRegister" data-authtab="register">Create Account</button>
+                </div>
+
+                <!-- Login Form -->
+                <form id="authLoginForm" class="auth-form">
+                    <div class="studio-form-group">
+                        <label>Email Address</label>
+                        <input type="email" id="loginEmailInput" class="studio-input" placeholder="alex@rediscloud.dev" required autocomplete="email">
+                    </div>
+                    <div class="studio-form-group">
+                        <label>Password</label>
+                        <input type="password" id="loginPasswordInput" class="studio-input" placeholder="••••••••" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="loginSubmitBtn" style="width: 100%; justify-content: center; margin-top: 0.5rem;">
+                        <iconify-icon icon="lucide:log-in" width="16"></iconify-icon>
+                        Sign In to Cloud Studio
+                    </button>
+                </form>
+
+                <!-- Register Form -->
+                <form id="authRegisterForm" class="auth-form" style="display: none;">
+                    <div class="studio-form-group">
+                        <label>Full Name</label>
+                        <input type="text" id="regNameInput" class="studio-input" placeholder="Alex Rivera" required autocomplete="name">
+                    </div>
+                    <div class="studio-form-group">
+                        <label>Work Email</label>
+                        <input type="email" id="regEmailInput" class="studio-input" placeholder="alex@rediscloud.dev" required autocomplete="email">
+                    </div>
+                    <div class="studio-form-group">
+                        <label>Password</label>
+                        <input type="password" id="regPasswordInput" class="studio-input" placeholder="At least 6 characters" required autocomplete="new-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="regSubmitBtn" style="width: 100%; justify-content: center; margin-top: 0.5rem;">
+                        <iconify-icon icon="lucide:user-plus" width="16"></iconify-icon>
+                        Create Free Account
+                    </button>
+                </form>
+
+                <!-- Demo Account Switcher Card -->
+                <div class="demo-accounts-card">
+                    <div class="demo-card-head">
+                        <iconify-icon icon="lucide:sparkles" width="14" style="color: #fbbf24;"></iconify-icon>
+                        <span>1-Click Demo Profiles (Instant Test)</span>
+                    </div>
+                    <div class="demo-buttons-grid">
+                        <button type="button" class="demo-user-btn" id="demoUserAlexBtn">
+                            <img src="https://api.dicebear.com/7.x/identicon/svg?seed=Alex" class="demo-avatar" alt="Alex">
+                            <div class="demo-info">
+                                <span class="name">Alex Rivera</span>
+                                <span class="role">Lead Dev (2 DBs)</span>
+                            </div>
+                        </button>
+                        <button type="button" class="demo-user-btn" id="demoUserSarahBtn">
+                            <img src="https://api.dicebear.com/7.x/identicon/svg?seed=Sarah" class="demo-avatar" alt="Sarah">
+                            <div class="demo-info">
+                                <span class="name">Sarah Chen</span>
+                                <span class="role">Product (1 DB, 1 Shared)</span>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Database Modal -->
+    <div class="modal-backdrop" id="createDbModal">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 0.65rem;">
+                    <div class="connect-icon-box" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8;">
+                        <iconify-icon icon="lucide:database" width="20"></iconify-icon>
+                    </div>
+                    <div>
+                        <h3 class="modal-title">Create Redis Database</h3>
+                        <p class="modal-sub">Deploy a high-performance in-memory keyspace instance</p>
+                    </div>
+                </div>
+                <button class="modal-close" id="closeCreateDbModalBtn">
+                    <iconify-icon icon="lucide:x" width="18"></iconify-icon>
+                </button>
+            </div>
+            <form id="createDatabaseForm">
+                <div class="modal-body">
+                    <div class="studio-form-group">
+                        <label>Database Name *</label>
+                        <input type="text" id="createDbNameInput" class="studio-input" placeholder="e.g. Production Cache or Session Store" required autocomplete="off">
+                        <small class="hint">Human-readable label for this database</small>
+                    </div>
+                    <div class="studio-form-group">
+                        <label>Custom Database ID (Optional)</label>
+                        <input type="text" id="createDbIdInput" class="studio-input font-mono" placeholder="Leave blank to auto-generate (db_xxxxxxxx)">
+                        <small class="hint">Unique identifier used in connection URLs and CLI auth</small>
+                    </div>
+                    <div class="studio-form-group">
+                        <label>Database Password (Optional)</label>
+                        <input type="text" id="createDbPassInput" class="studio-input font-mono" placeholder="Leave blank to generate secure secret">
+                        <small class="hint">Secret password for Redis wire connections</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="cancelCreateDbBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="submitCreateDbBtn">
+                        <iconify-icon icon="lucide:plus" width="14"></iconify-icon>
+                        Create Database
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Share Database Modal -->
+    <div class="modal-backdrop" id="shareDbModal">
+        <div class="modal-dialog share-modal-dialog">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 0.65rem;">
+                    <div class="connect-icon-box" style="background: rgba(167, 139, 250, 0.15); color: #a78bfa;">
+                        <iconify-icon icon="lucide:share-2" width="20"></iconify-icon>
+                    </div>
+                    <div>
+                        <h3 class="modal-title">Share Database</h3>
+                        <p class="modal-sub" id="shareDbModalSubtitle">Manage collaborators and team permissions</p>
+                    </div>
+                </div>
+                <button class="modal-close" id="closeShareDbModalBtn">
+                    <iconify-icon icon="lucide:x" width="18"></iconify-icon>
+                </button>
+            </div>
+            <div class="modal-body">
+                <!-- Invite by Email Section -->
+                <div class="share-invite-box">
+                    <label class="lbl-small">Invite Teammate by Email:</label>
+                    <form id="inviteCollaboratorForm" class="invite-form-row">
+                        <input type="email" id="shareTargetEmailInput" class="studio-input" placeholder="teammate@company.io" required>
+                        <select id="shareTargetRoleSelect" class="studio-select" style="min-width: 120px;">
+                            <option value="EDITOR">Editor (Read &amp; Write)</option>
+                            <option value="VIEWER">Viewer (Read Only)</option>
+                        </select>
+                        <button type="submit" class="btn btn-primary btn-sm" id="sendInviteBtn">
+                            <iconify-icon icon="lucide:user-plus" width="14"></iconify-icon>
+                            Invite
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Existing Collaborators List -->
+                <div class="share-section">
+                    <span class="lbl-small">People with Access:</span>
+                    <div class="collaborators-list" id="shareCollaboratorsList">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Shareable Invite Link Box -->
+                <div class="share-link-box">
+                    <div class="share-link-header">
+                        <div class="sl-title">
+                            <iconify-icon icon="lucide:link-2" width="15" style="color: #38bdf8;"></iconify-icon>
+                            <span>Shareable Invite Link</span>
+                        </div>
+                        <div class="sl-toggle-group">
+                            <label class="switch-sm">
+                                <input type="checkbox" id="shareLinkEnableCheck">
+                                <span class="slider-sm"></span>
+                            </label>
+                            <span class="sl-toggle-label" id="shareLinkStatusLabel">Disabled</span>
+                        </div>
+                    </div>
+                    <div class="sl-link-body" id="shareLinkBody" style="display: none;">
+                        <p class="sl-desc">Anyone with this link can join this database as:</p>
+                        <div class="sl-role-row">
+                            <select id="shareLinkRoleSelect" class="studio-select-sm">
+                                <option value="VIEWER">Viewer (Read Only)</option>
+                                <option value="EDITOR">Editor (Read &amp; Write)</option>
+                            </select>
+                        </div>
+                        <div class="url-input-wrap" style="margin-top: 0.5rem;">
+                            <input type="text" id="shareLinkInput" readonly class="studio-input font-mono" style="font-size: 0.8rem;">
+                            <button class="btn btn-secondary btn-sm" id="copyShareLinkBtn">
+                                <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
+                                Copy Link
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="closeShareDbModalBtn2">Close</button>
             </div>
         </div>
     </div>

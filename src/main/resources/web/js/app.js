@@ -19,7 +19,18 @@ let tenantsCache = [];
 let activeConnectTenantUsername = 'admin';
 let activeConnectTab = 'prisma';
 
+// User & Database Hub State
+let currentUser = null;
+let currentSessionToken = localStorage.getItem('redis_studio_session') || '';
+let userDatabases = { myDatabases: [], sharedWithMe: [] };
+let activeDbInstance = null;
+let activeDatabaseRole = 'OWNER';
+let activeDbTab = 'my';
+let activeShareDbId = null;
+
 document.addEventListener('DOMContentLoaded', () => {
+    initAuth();
+    initDatabaseHub();
     initNavigation();
     initVirtualDatabaseSelector();
     initDatasheetToolbar();
@@ -63,9 +74,9 @@ function initNavigation() {
                 }
                 updateBreadcrumb();
                 fetchKeys();
-            } else if (targetPaneId === 'pane-tenants') {
-                updateBreadcrumb('Accounts & Virtual DBs');
-                loadTenants();
+            } else if (targetPaneId === 'pane-databases' || targetPaneId === 'pane-tenants') {
+                updateBreadcrumb('Database Hub & Team Sharing');
+                loadUserDatabases();
             } else if (targetPaneId === 'pane-cloud-api') {
                 updateBreadcrumb('Cloud REST API & RLS');
                 loadAclUsers();
@@ -1397,18 +1408,64 @@ function initVirtualDatabaseSelector() {
 
 function switchVirtualDatabase(dbName) {
     activeVirtualDb = dbName || 'default';
-    const pill = document.getElementById('sbActiveDbPill');
     const displayDb = activeVirtualDb === 'default' ? 'db0' : activeVirtualDb;
-    if (pill) pill.textContent = displayDb;
+
+    const allDbs = [...(userDatabases.myDatabases || []), ...(userDatabases.sharedWithMe || [])];
+    const found = allDbs.find(d => d.id === activeVirtualDb || d.name === activeVirtualDb);
+    activeDbInstance = found || null;
+    activeDatabaseRole = found ? (found.userRole || 'OWNER') : 'OWNER';
+
+    // Update Top bar role badge
+    const roleBadge = document.getElementById('activeDbRoleBadge');
+    if (roleBadge) {
+        roleBadge.textContent = activeDatabaseRole;
+        roleBadge.className = `db-role-badge-pill ${activeDatabaseRole}`;
+        roleBadge.style.display = 'inline-block';
+    }
+
+    // Role-based UI restriction: VIEWER is read-only
+    const isViewer = (activeDatabaseRole === 'VIEWER');
+    const insertBtn = document.getElementById('openInsertModalBtn');
+    if (insertBtn) {
+        insertBtn.disabled = isViewer;
+        insertBtn.title = isViewer ? "Insert disabled (Viewer role)" : "Insert Record";
+    }
+    const flushBtn = document.getElementById('flushDbBtn');
+    if (flushBtn) {
+        flushBtn.style.display = isViewer ? 'none' : 'flex';
+    }
+    const importBtn = document.getElementById('importDataBtn');
+    if (importBtn) {
+        importBtn.disabled = isViewer;
+    }
+    const batchDelBtn = document.getElementById('batchDeleteBtn');
+    if (batchDelBtn) {
+        batchDelBtn.disabled = isViewer;
+    }
+    const inspDelBtn = document.getElementById('inspDeleteRecordBtn');
+    if (inspDelBtn) {
+        inspDelBtn.disabled = isViewer;
+    }
+    const inspSaveBtn = document.getElementById('inspSaveRecordBtn');
+    if (inspSaveBtn) {
+        inspSaveBtn.disabled = isViewer;
+    }
+
+    const pill = document.getElementById('sbActiveDbPill');
+    if (pill) pill.textContent = found ? found.name : displayDb;
 
     const sel = document.getElementById('vdbSelect');
     if (sel && sel.value !== activeVirtualDb) {
         sel.value = activeVirtualDb;
     }
 
-    const statActive = document.getElementById('statActiveTenantName');
+    const statActive = document.getElementById('statActiveDbName');
     if (statActive) {
-        statActive.textContent = displayDb;
+        statActive.textContent = found ? found.name : displayDb;
+    }
+    const statActiveRole = document.getElementById('statActiveDbRoleSub');
+    if (statActiveRole) {
+        statActiveRole.textContent = `Role: ${activeDatabaseRole}`;
     }
 
     currentPage = 1;
@@ -1416,31 +1473,39 @@ function switchVirtualDatabase(dbName) {
     updateBatchBar();
     fetchKeys();
     fetchStats();
-    showToast(`Switched active database to ${displayDb}`);
+    showToast(`Active database: ${found ? found.name : displayDb} (${activeDatabaseRole})`);
 }
 
-function updateVirtualDatabaseSelector(databases, activeDb) {
+function updateVirtualDatabaseSelector(myDbs = [], sharedDbs = []) {
     const sel = document.getElementById('vdbSelect');
     if (!sel) return;
 
-    const knownDbs = new Set(['default']);
-    let optionsHtml = `<option value="default">db0 (Default Root)</option>`;
-    if (databases && Array.isArray(databases)) {
-        databases.forEach(db => {
-            const val = db.dbName || db.tenant;
-            if (val && val !== 'default' && val !== 'admin' && val !== 'db0') {
-                knownDbs.add(val);
-                optionsHtml += `<option value="${escapeHtml(val)}">${escapeHtml(val)} (${db.keyCount || 0} keys)</option>`;
-            }
+    let optionsHtml = '';
+    if (myDbs.length > 0) {
+        optionsHtml += `<optgroup label="My Databases">`;
+        myDbs.forEach(db => {
+            optionsHtml += `<option value="${escapeHtml(db.id)}">${escapeHtml(db.name)} (${db.keyCount || 0} keys)</option>`;
         });
+        optionsHtml += `</optgroup>`;
+    }
+    if (sharedDbs.length > 0) {
+        optionsHtml += `<optgroup label="Shared With Me">`;
+        sharedDbs.forEach(db => {
+            optionsHtml += `<option value="${escapeHtml(db.id)}">${escapeHtml(db.name)} (${db.userRole})</option>`;
+        });
+        optionsHtml += `</optgroup>`;
+    }
+    if (!myDbs.length && !sharedDbs.length) {
+        optionsHtml = `<option value="default">db0 (Default Root)</option>`;
     }
 
     sel.innerHTML = optionsHtml;
-    if (knownDbs.has(activeVirtualDb)) {
+    const all = [...myDbs, ...sharedDbs];
+    if (all.some(d => d.id === activeVirtualDb)) {
         sel.value = activeVirtualDb;
-    } else {
-        sel.value = 'default';
-        activeVirtualDb = 'default';
+    } else if (all.length > 0) {
+        activeVirtualDb = all[0].id;
+        sel.value = activeVirtualDb;
     }
 }
 
@@ -1891,4 +1956,787 @@ function copyToClipboard(text, successMsg = 'Copied to clipboard!') {
         showToast(successMsg);
     });
 }
+
+// ==========================================
+// Authentication Engine (Google, Email, Demo Switcher)
+// ==========================================
+function initAuth() {
+    // 1. Intercept fetch to automatically attach currentSessionToken
+    const _rawFetch = window.fetch;
+    window.fetch = function(input, init) {
+        init = init || {};
+        init.headers = init.headers || {};
+        const tok = currentSessionToken || localStorage.getItem('redis_studio_session');
+        if (tok) {
+            if (init.headers instanceof Headers) {
+                if (!init.headers.has('Authorization')) {
+                    init.headers.append('Authorization', `Bearer ${tok}`);
+                }
+            } else if (Array.isArray(init.headers)) {
+                init.headers.push(['Authorization', `Bearer ${tok}`]);
+            } else {
+                if (!init.headers['Authorization']) {
+                    init.headers['Authorization'] = `Bearer ${tok}`;
+                }
+            }
+        }
+        return _rawFetch(input, init);
+    };
+
+    // Google Sign-In button
+    const googleBtn = document.getElementById('googleSignInBtn');
+    if (googleBtn) {
+        googleBtn.addEventListener('click', async () => {
+            const email = prompt("Enter Google account email to sign in:", "alex@rediscloud.dev");
+            if (!email) return;
+            const name = email.split('@')[0];
+            await loginWithGoogle(email, name);
+        });
+    }
+
+    // Demo Accounts buttons
+    const demoAlexBtn = document.getElementById('demoUserAlexBtn');
+    if (demoAlexBtn) {
+        demoAlexBtn.addEventListener('click', async () => {
+            await loginWithEmail("alex@rediscloud.dev", "redis123");
+        });
+    }
+
+    const demoSarahBtn = document.getElementById('demoUserSarahBtn');
+    if (demoSarahBtn) {
+        demoSarahBtn.addEventListener('click', async () => {
+            await loginWithEmail("sarah@company.io", "redis123");
+        });
+    }
+
+    // Tabs for Login / Register
+    const tabLogin = document.getElementById('authTabLogin');
+    const tabRegister = document.getElementById('authTabRegister');
+    const formLogin = document.getElementById('authLoginForm');
+    const formRegister = document.getElementById('authRegisterForm');
+
+    if (tabLogin && tabRegister && formLogin && formRegister) {
+        tabLogin.addEventListener('click', () => {
+            tabLogin.classList.add('active');
+            tabRegister.classList.remove('active');
+            formLogin.style.display = 'flex';
+            formRegister.style.display = 'none';
+        });
+
+        tabRegister.addEventListener('click', () => {
+            tabRegister.classList.add('active');
+            tabLogin.classList.remove('active');
+            formRegister.style.display = 'flex';
+            formLogin.style.display = 'none';
+        });
+    }
+
+    if (formLogin) {
+        formLogin.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('loginEmailInput').value.trim();
+            const pass = document.getElementById('loginPasswordInput').value;
+            await loginWithEmail(email, pass);
+        });
+    }
+
+    if (formRegister) {
+        formRegister.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('regNameInput').value.trim();
+            const email = document.getElementById('regEmailInput').value.trim();
+            const pass = document.getElementById('regPasswordInput').value;
+            await registerWithEmail(name, email, pass);
+        });
+    }
+
+    // User profile menu in top bar
+    const profileBtn = document.getElementById('userProfileBtn');
+    const dropdown = document.getElementById('userDropdownCard');
+    if (profileBtn && dropdown) {
+        profileBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!profileBtn.contains(e.target) && !dropdown.contains(e.target)) {
+                dropdown.style.display = 'none';
+            }
+        });
+    }
+
+    const menuMyDbsBtn = document.getElementById('menuMyDatabasesBtn');
+    if (menuMyDbsBtn) {
+        menuMyDbsBtn.addEventListener('click', () => {
+            if (dropdown) dropdown.style.display = 'none';
+            document.querySelectorAll('.sidebar .nav-item').forEach(i => i.classList.remove('active'));
+            const navBtn = document.getElementById('navDatabasesBtn');
+            if (navBtn) navBtn.classList.add('active');
+
+            document.querySelectorAll('.studio-pane').forEach(p => p.style.display = 'none');
+            const pane = document.getElementById('pane-databases');
+            if (pane) pane.style.display = 'flex';
+            updateBreadcrumb('Database Hub & Team Sharing');
+            loadUserDatabases();
+        });
+    }
+
+    const menuSwitchAccBtn = document.getElementById('menuSwitchAccountBtn');
+    if (menuSwitchAccBtn) {
+        menuSwitchAccBtn.addEventListener('click', () => {
+            if (dropdown) dropdown.style.display = 'none';
+            openAuthModal();
+        });
+    }
+
+    const menuSignOutBtn = document.getElementById('menuSignOutBtn');
+    if (menuSignOutBtn) {
+        menuSignOutBtn.addEventListener('click', async () => {
+            if (dropdown) dropdown.style.display = 'none';
+            await logout();
+        });
+    }
+
+    // Check auth on load
+    checkAuth();
+}
+
+async function checkAuth() {
+    const tok = localStorage.getItem('redis_studio_session');
+    if (!tok) {
+        // Auto-login as Alex demo user for zero friction testing
+        await loginWithEmail("alex@rediscloud.dev", "redis123", true);
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+            const data = await res.json();
+            currentUser = data.user;
+            currentSessionToken = tok;
+            updateUserProfileUI(currentUser);
+            closeAuthModal();
+            await checkJoinLink();
+            await loadUserDatabases();
+        } else {
+            await loginWithEmail("alex@rediscloud.dev", "redis123", true);
+        }
+    } catch (e) {
+        console.error('Auth verification failed:', e);
+    }
+}
+
+async function checkJoinLink() {
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#join=')) {
+        const token = hash.substring(6);
+        try {
+            const res = await fetch('/api/databases/join', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(`Joined database "${data.database.name}"!`);
+                window.location.hash = '';
+            } else {
+                showToast(data.error || 'Failed to join database', true);
+            }
+        } catch (e) {
+            showToast('Join link error: ' + e.message, true);
+        }
+    }
+}
+
+async function loginWithEmail(email, password, isSilent = false) {
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || 'Login failed');
+        }
+
+        currentSessionToken = data.token;
+        localStorage.setItem('redis_studio_session', data.token);
+        currentUser = data.user;
+        updateUserProfileUI(currentUser);
+        closeAuthModal();
+        if (!isSilent) showToast(`Signed in as ${currentUser.name}`);
+        await loadUserDatabases();
+        fetchKeys();
+        fetchStats();
+    } catch (e) {
+        if (!isSilent) showToast(e.message, true);
+    }
+}
+
+async function loginWithGoogle(email, name) {
+    try {
+        const res = await fetch('/api/auth/google', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email,
+                name: name || email.split('@')[0],
+                avatarUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(name || email)}`
+            })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || 'Google login failed');
+        }
+
+        currentSessionToken = data.token;
+        localStorage.setItem('redis_studio_session', data.token);
+        currentUser = data.user;
+        updateUserProfileUI(currentUser);
+        closeAuthModal();
+        showToast(`Google Sign-In successful (${currentUser.email})`);
+        await loadUserDatabases();
+        fetchKeys();
+        fetchStats();
+    } catch (e) {
+        showToast(e.message, true);
+    }
+}
+
+async function registerWithEmail(name, email, password) {
+    try {
+        const res = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, email, password })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || 'Registration failed');
+        }
+
+        currentSessionToken = data.token;
+        localStorage.setItem('redis_studio_session', data.token);
+        currentUser = data.user;
+        updateUserProfileUI(currentUser);
+        closeAuthModal();
+        showToast(`Account created! Welcome, ${currentUser.name}`);
+        await loadUserDatabases();
+        fetchKeys();
+        fetchStats();
+    } catch (e) {
+        showToast(e.message, true);
+    }
+}
+
+async function logout() {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (ignored) {}
+    localStorage.removeItem('redis_studio_session');
+    currentSessionToken = '';
+    currentUser = null;
+    openAuthModal();
+    showToast('Signed out');
+}
+
+function updateUserProfileUI(user) {
+    if (!user) return;
+    const avatar = user.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(user.name || user.email)}`;
+
+    const topImg = document.getElementById('userAvatarImg');
+    if (topImg) topImg.src = avatar;
+    const topName = document.getElementById('userProfileName');
+    if (topName) topName.textContent = user.name || user.email;
+
+    const ddImg = document.getElementById('userDropdownAvatar');
+    if (ddImg) ddImg.src = avatar;
+    const ddName = document.getElementById('userDropdownName');
+    if (ddName) ddName.textContent = user.name || user.email;
+    const ddEmail = document.getElementById('userDropdownEmail');
+    if (ddEmail) ddEmail.textContent = user.email;
+}
+
+function openAuthModal() {
+    const modal = document.getElementById('authModal');
+    if (modal) modal.classList.add('open');
+}
+
+function closeAuthModal() {
+    const modal = document.getElementById('authModal');
+    if (modal) modal.classList.remove('open');
+}
+
+// ==========================================
+// Database Hub Management & Sharing
+// ==========================================
+function initDatabaseHub() {
+    const tabMy = document.getElementById('tabMyDbsBtn');
+    const tabShared = document.getElementById('tabSharedDbsBtn');
+    const refreshBtn = document.getElementById('refreshDatabasesBtn');
+    const openCreateBtn = document.getElementById('openCreateDbModalBtn');
+    const createModal = document.getElementById('createDbModal');
+    const closeCreateBtn = document.getElementById('closeCreateDbModalBtn');
+    const cancelCreateBtn = document.getElementById('cancelCreateDbBtn');
+    const createForm = document.getElementById('createDatabaseForm');
+
+    if (tabMy && tabShared) {
+        tabMy.addEventListener('click', () => {
+            tabMy.classList.add('active');
+            tabShared.classList.remove('active');
+            activeDbTab = 'my';
+            renderDatabaseCards();
+        });
+
+        tabShared.addEventListener('click', () => {
+            tabShared.classList.add('active');
+            tabMy.classList.remove('active');
+            activeDbTab = 'shared';
+            renderDatabaseCards();
+        });
+    }
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            loadUserDatabases();
+            showToast('Databases refreshed');
+        });
+    }
+
+    if (openCreateBtn && createModal) {
+        openCreateBtn.addEventListener('click', () => {
+            createModal.classList.add('open');
+            const nameInput = document.getElementById('createDbNameInput');
+            if (nameInput) nameInput.focus();
+        });
+    }
+
+    const closeCreate = () => { if (createModal) createModal.classList.remove('open'); };
+    if (closeCreateBtn) closeCreateBtn.addEventListener('click', closeCreate);
+    if (cancelCreateBtn) cancelCreateBtn.addEventListener('click', closeCreate);
+
+    if (createForm) {
+        createForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const submitBtn = document.getElementById('submitCreateDbBtn');
+            const name = document.getElementById('createDbNameInput').value.trim();
+            const id = document.getElementById('createDbIdInput').value.trim();
+            const password = document.getElementById('createDbPassInput').value.trim();
+
+            if (!name) {
+                showToast('Database name is required', true);
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<div class="studio-spinner" style="width: 14px; height: 14px; border-width: 2px;"></div> Creating...';
+
+            try {
+                const res = await fetch('/api/databases', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, id, password })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    throw new Error(data.error || 'Failed to create database');
+                }
+
+                showToast(`Created database "${name}"!`);
+                closeCreate();
+                createForm.reset();
+                await loadUserDatabases();
+
+                // Switch to this database and open connect modal
+                if (data.database && data.database.id) {
+                    switchVirtualDatabase(data.database.id);
+                    openConnectModalForDb(data.database.id);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<iconify-icon icon="lucide:plus" width="14"></iconify-icon> Create Database';
+            }
+        });
+    }
+
+    initShareModalEvents();
+}
+
+async function loadUserDatabases() {
+    try {
+        const res = await fetch('/api/databases');
+        if (!res.ok) {
+            if (res.status === 401) {
+                openAuthModal();
+                return;
+            }
+            throw new Error('HTTP ' + res.status);
+        }
+        const data = await res.json();
+        userDatabases = {
+            myDatabases: data.myDatabases || [],
+            sharedWithMe: data.sharedWithMe || []
+        };
+
+        const myCount = userDatabases.myDatabases.length;
+        const sharedCount = userDatabases.sharedWithMe.length;
+        const totalCount = myCount + sharedCount;
+
+        const sbBadge = document.getElementById('sbDbsCountBadge');
+        if (sbBadge) sbBadge.textContent = totalCount;
+        const statMy = document.getElementById('statMyDbsCount');
+        if (statMy) statMy.textContent = myCount;
+        const statShared = document.getElementById('statSharedDbsCount');
+        if (statShared) statShared.textContent = sharedCount;
+        const tabMyBadge = document.getElementById('tabMyDbsBadge');
+        if (tabMyBadge) tabMyBadge.textContent = myCount;
+        const tabSharedBadge = document.getElementById('tabSharedDbsBadge');
+        if (tabSharedBadge) tabSharedBadge.textContent = sharedCount;
+
+        updateVirtualDatabaseSelector(userDatabases.myDatabases, userDatabases.sharedWithMe);
+
+        const all = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe];
+        if (all.length > 0 && (activeVirtualDb === 'default' || !all.some(d => d.id === activeVirtualDb))) {
+            switchVirtualDatabase(all[0].id);
+        }
+
+        renderDatabaseCards();
+    } catch (e) {
+        console.error('Failed to load user databases:', e);
+    }
+}
+
+function renderDatabaseCards() {
+    const container = document.getElementById('databaseCardsContainer');
+    if (!container) return;
+
+    const list = (activeDbTab === 'my') ? userDatabases.myDatabases : userDatabases.sharedWithMe;
+
+    if (!list || list.length === 0) {
+        const emptyMsg = (activeDbTab === 'my')
+            ? `You haven't created any databases yet. Click "New Database" above to provision your first Redis instance!`
+            : `No databases have been shared with you yet. Teammates can share databases with your email (${escapeHtml(currentUser ? currentUser.email : '')}).`;
+        container.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1; padding: 3rem 1rem; text-align: center; color: var(--text-muted);">${emptyMsg}</div>`;
+        return;
+    }
+
+    container.innerHTML = list.map(db => {
+        const isCurrentActive = (activeVirtualDb === db.id);
+        const role = db.userRole || 'OWNER';
+        const urls = db.connectionUrls || {};
+        const isOwner = (role === 'OWNER');
+
+        return `
+            <div class="db-card ${isCurrentActive ? 'active-db' : ''}" data-dbid="${escapeHtml(db.id)}">
+                <div class="db-card-head">
+                    <div class="db-card-title-wrap">
+                        <div class="db-icon-box">
+                            <iconify-icon icon="lucide:database" width="18"></iconify-icon>
+                        </div>
+                        <div>
+                            <div class="db-card-name">${escapeHtml(db.name)}</div>
+                            <div class="db-card-id-tag">${escapeHtml(db.id)}</div>
+                        </div>
+                    </div>
+                    <span class="db-role-badge-pill ${role}">${escapeHtml(role)}</span>
+                </div>
+
+                ${!isOwner ? `
+                <div style="font-size: 0.72rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.35rem;">
+                    <iconify-icon icon="lucide:user" width="12"></iconify-icon>
+                    Owner: <span style="color: var(--text-main); font-weight: 500;">${escapeHtml(db.ownerEmail || '')}</span>
+                </div>` : ''}
+
+                <div class="db-card-stats">
+                    <div class="db-stat-item">
+                        <span class="stat-k">Keys</span>
+                        <span class="stat-v">${(db.keyCount || 0).toLocaleString()}</span>
+                    </div>
+                    <div class="db-stat-item">
+                        <span class="stat-k">Memory</span>
+                        <span class="stat-v">${escapeHtml(db.memoryHuman || '0 B')}</span>
+                    </div>
+                    <div class="db-stat-item">
+                        <span class="stat-k">Team</span>
+                        <span class="stat-v">${db.collaboratorsCount || 1} users</span>
+                    </div>
+                </div>
+
+                <div class="db-card-url-box">
+                    <div class="url-copy-field">
+                        <span class="prefix">Redis URL</span>
+                        <code title="${escapeHtml(urls.redisUrl || '')}">${escapeHtml(urls.redisUrl || '')}</code>
+                        <button class="btn-icon-copy" onclick="copyToClipboard('${escapeHtml(urls.redisUrl || '')}', 'Copied Redis URL!')" title="Copy URL">
+                            <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
+                        </button>
+                    </div>
+                    <div class="url-copy-field">
+                        <span class="prefix">API Token</span>
+                        <code title="${escapeHtml(db.apiToken || '')}">${escapeHtml(db.apiToken || '')}</code>
+                        <button class="btn-icon-copy" onclick="copyToClipboard('${escapeHtml(db.apiToken || '')}', 'Copied API Token!')" title="Copy Token">
+                            <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="db-card-actions">
+                    <button class="btn ${isCurrentActive ? 'btn-secondary' : 'btn-primary'} btn-sm" onclick="openDatabaseInDatasheet('${escapeHtml(db.id)}')">
+                        <iconify-icon icon="lucide:layout-grid" width="13"></iconify-icon>
+                        ${isCurrentActive ? 'Currently In Datasheet' : 'Open in Datasheet'}
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="openConnectModalForDb('${escapeHtml(db.id)}')">
+                        <iconify-icon icon="lucide:link-2" width="13"></iconify-icon>
+                        Connect
+                    </button>
+                    ${isOwner ? `
+                    <button class="btn btn-secondary btn-sm" onclick="openShareModal('${escapeHtml(db.id)}')">
+                        <iconify-icon icon="lucide:share-2" width="13"></iconify-icon>
+                        Share
+                    </button>
+                    <button class="btn btn-secondary btn-sm text-danger" onclick="deleteDatabase('${escapeHtml(db.id)}', '${escapeHtml(db.name)}')">
+                        <iconify-icon icon="lucide:trash-2" width="13"></iconify-icon>
+                    </button>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function openDatabaseInDatasheet(dbId) {
+    switchVirtualDatabase(dbId);
+    document.querySelectorAll('.sidebar .nav-item').forEach(i => i.classList.remove('active'));
+    const datasheetNavItem = document.querySelector('.nav-item[data-type-filter="ALL"]');
+    if (datasheetNavItem) datasheetNavItem.classList.add('active');
+
+    document.querySelectorAll('.studio-pane').forEach(p => p.style.display = 'none');
+    const pane = document.getElementById('pane-datasheet');
+    if (pane) pane.style.display = 'flex';
+    updateBreadcrumb('All Records');
+}
+
+function openConnectModalForDb(dbId) {
+    const all = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe];
+    const db = all.find(d => d.id === dbId);
+    if (!db) {
+        openConnectModal();
+        return;
+    }
+
+    const host = window.location.hostname || 'localhost';
+    const redisPort = 6379;
+    const webPort = window.location.port || 8080;
+    const stdUrl = `redis://${db.id}:${db.password}@${host}:${redisPort}`;
+    const tokUrl = `redis://:${db.apiToken}@${host}:${redisPort}`;
+
+    const redisInput = document.getElementById('connRedisUrlInput');
+    const tokenInput = document.getElementById('connTokenUrlInput');
+    if (redisInput) redisInput.value = stdUrl;
+    if (tokenInput) tokenInput.value = tokUrl;
+
+    const select = document.getElementById('connectAccountSelect');
+    if (select) {
+        select.innerHTML = `<option value="${escapeHtml(db.id)}">${escapeHtml(db.name)} (${escapeHtml(db.id)}) - ${escapeHtml(db.userRole || 'OWNER')}</option>`;
+        select.value = db.id;
+    }
+
+    const fakeUser = {
+        username: db.id,
+        password: db.password,
+        apiToken: db.apiToken,
+        virtualDb: db.id
+    };
+    renderConnectSnippet(fakeUser, stdUrl, tokUrl, host, redisPort, webPort);
+
+    const modal = document.getElementById('connectModal');
+    if (modal) modal.classList.add('open');
+}
+
+function openShareModal(dbId) {
+    activeShareDbId = dbId;
+    const all = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe];
+    const db = all.find(d => d.id === dbId);
+    if (!db) return;
+
+    const modal = document.getElementById('shareDbModal');
+    const sub = document.getElementById('shareDbModalSubtitle');
+    if (sub) sub.textContent = `Managing access for "${db.name}" (${db.id})`;
+
+    renderShareModalCollaborators(db);
+
+    const linkToggle = document.getElementById('shareLinkEnableCheck');
+    const linkStatus = document.getElementById('shareLinkStatusLabel');
+    const linkBody = document.getElementById('shareLinkBody');
+    const linkInput = document.getElementById('shareLinkInput');
+    const roleSelect = document.getElementById('shareLinkRoleSelect');
+
+    const host = window.location.host;
+    const shareLinkUrl = `${window.location.protocol}//${host}/#join=${db.shareLinkToken || ''}`;
+
+    if (linkToggle) linkToggle.checked = !!db.shareLinkEnabled;
+    if (linkStatus) linkStatus.textContent = db.shareLinkEnabled ? 'Active' : 'Disabled';
+    if (linkBody) linkBody.style.display = db.shareLinkEnabled ? 'block' : 'none';
+    if (linkInput) linkInput.value = shareLinkUrl;
+    if (roleSelect && db.shareLinkRole) roleSelect.value = db.shareLinkRole;
+
+    if (modal) modal.classList.add('open');
+}
+
+function renderShareModalCollaborators(db) {
+    const listEl = document.getElementById('shareCollaboratorsList');
+    if (!listEl) return;
+
+    const collabs = db.collaborators || [
+        { email: db.ownerEmail, role: 'OWNER' }
+    ];
+
+    listEl.innerHTML = collabs.map(c => {
+        const isOwner = (c.role === 'OWNER');
+        const initial = (c.email ? c.email[0] : 'U').toUpperCase();
+        return `
+            <div class="collaborator-item">
+                <div class="collab-left">
+                    <div class="collab-avatar">${initial}</div>
+                    <div class="collab-email">${escapeHtml(c.email)}</div>
+                </div>
+                <div class="collab-right">
+                    <span class="db-role-badge-pill ${c.role}">${escapeHtml(c.role)}</span>
+                    ${!isOwner ? `
+                    <button class="btn btn-secondary btn-sm" style="padding: 0.2rem 0.5rem; color: #f87171;" onclick="unshareCollaborator('${escapeHtml(db.id)}', '${escapeHtml(c.email)}')">
+                        <iconify-icon icon="lucide:user-minus" width="13"></iconify-icon>
+                        Remove
+                    </button>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function initShareModalEvents() {
+    const shareModal = document.getElementById('shareDbModal');
+    const closeBtn1 = document.getElementById('closeShareDbModalBtn');
+    const closeBtn2 = document.getElementById('closeShareDbModalBtn2');
+    const inviteForm = document.getElementById('inviteCollaboratorForm');
+    const linkToggle = document.getElementById('shareLinkEnableCheck');
+    const roleSelect = document.getElementById('shareLinkRoleSelect');
+    const copyLinkBtn = document.getElementById('copyShareLinkBtn');
+
+    const closeShare = () => { if (shareModal) shareModal.classList.remove('open'); };
+    if (closeBtn1) closeBtn1.addEventListener('click', closeShare);
+    if (closeBtn2) closeBtn2.addEventListener('click', closeShare);
+
+    if (inviteForm) {
+        inviteForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!activeShareDbId) return;
+            const email = document.getElementById('shareTargetEmailInput').value.trim();
+            const role = document.getElementById('shareTargetRoleSelect').value;
+            const sendBtn = document.getElementById('sendInviteBtn');
+
+            sendBtn.disabled = true;
+            try {
+                const res = await fetch('/api/databases/share', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dbId: activeShareDbId, targetEmail: email, role })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    throw new Error(data.error || 'Failed to share database');
+                }
+
+                showToast(`Shared with ${email} as ${role}!`);
+                document.getElementById('shareTargetEmailInput').value = '';
+                await loadUserDatabases();
+                const all = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe];
+                const updatedDb = all.find(d => d.id === activeShareDbId);
+                if (updatedDb) renderShareModalCollaborators(updatedDb);
+            } catch (err) {
+                showToast(err.message, true);
+            } finally {
+                sendBtn.disabled = false;
+            }
+        });
+    }
+
+    const updateShareLinkState = async () => {
+        if (!activeShareDbId) return;
+        const enabled = linkToggle.checked;
+        const role = roleSelect.value;
+        try {
+            const res = await fetch('/api/databases/share-link', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dbId: activeShareDbId, enabled, role })
+            });
+            const data = await res.json();
+            if (data.success) {
+                document.getElementById('shareLinkStatusLabel').textContent = enabled ? 'Active' : 'Disabled';
+                document.getElementById('shareLinkBody').style.display = enabled ? 'block' : 'none';
+                const host = window.location.host;
+                const linkUrl = `${window.location.protocol}//${host}/#join=${data.token || ''}`;
+                document.getElementById('shareLinkInput').value = linkUrl;
+                showToast(enabled ? 'Invite link enabled' : 'Invite link disabled');
+                await loadUserDatabases();
+            }
+        } catch (e) {
+            showToast('Failed to update share link: ' + e.message, true);
+        }
+    };
+
+    if (linkToggle) linkToggle.addEventListener('change', updateShareLinkState);
+    if (roleSelect) roleSelect.addEventListener('change', updateShareLinkState);
+
+    if (copyLinkBtn) {
+        copyLinkBtn.addEventListener('click', () => {
+            const url = document.getElementById('shareLinkInput').value;
+            copyToClipboard(url, 'Invite link copied to clipboard!');
+        });
+    }
+}
+
+async function unshareCollaborator(dbId, targetEmail) {
+    if (!confirm(`Remove collaborator ${targetEmail}?`)) return;
+    try {
+        const res = await fetch('/api/databases/unshare', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dbId, targetEmail })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Removed access for ${targetEmail}`);
+            await loadUserDatabases();
+            const all = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe];
+            const updatedDb = all.find(d => d.id === dbId);
+            if (updatedDb) renderShareModalCollaborators(updatedDb);
+        }
+    } catch (e) {
+        showToast('Error removing collaborator: ' + e.message, true);
+    }
+}
+
+async function deleteDatabase(dbId, dbName) {
+    if (!confirm(`⚠️ Are you sure you want to DELETE database "${dbName}" (${dbId})? All keys and data will be permanently erased.`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/databases?id=${encodeURIComponent(dbId)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Database "${dbName}" deleted`);
+            await loadUserDatabases();
+        } else {
+            showToast(data.error || 'Failed to delete database', true);
+        }
+    } catch (e) {
+        showToast('Error deleting database: ' + e.message, true);
+    }
+}
+
 

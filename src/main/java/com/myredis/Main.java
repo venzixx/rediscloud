@@ -33,15 +33,16 @@ public class Main {
             ExpiryEngine expiryEngine = new ExpiryEngine(storage, virtualDbManager);
             expiryEngine.start(config.getExpiryIntervalMillis());
 
-            // 4. Security & ACL Engine
+            // 4. Security & ACL Engine & Accounts
             com.myredis.security.AclEngine aclEngine = new com.myredis.security.AclEngine();
+            com.myredis.security.AccountManager accountManager = new com.myredis.security.AccountManager();
 
             // 5. Start Redis TCP Server (port 6379)
             RedisServer redisServer = new RedisServer(config.getHost(), config.getRedisPort(), storage, registry, aclEngine, virtualDbManager);
             redisServer.start();
 
             // 6. Start Web Management Server (port 8080)
-            WebServer webServer = new WebServer(config.getHost(), config.getWebPort(), config.getRedisPort(), storage, registry, aclEngine, virtualDbManager);
+            WebServer webServer = new WebServer(config.getHost(), config.getWebPort(), config.getRedisPort(), storage, registry, aclEngine, virtualDbManager, accountManager);
             webServer.start();
 
             // Graceful shutdown hook

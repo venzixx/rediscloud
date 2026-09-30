@@ -87,30 +87,53 @@ public class ClientConnection implements Runnable {
                     break;
                 }
 
-                // Handle AUTH command (supports both AUTH <pass/token> and AUTH <user> <pass>)
-                if ("AUTH".equals(cmdName) && aclEngine != null) {
-                    com.myredis.security.User u = null;
-                    if (args.size() == 2) {
-                        u = aclEngine.authenticateSingleTokenOrPass(args.get(1));
-                    } else if (args.size() == 3) {
-                        u = aclEngine.authenticate(args.get(1), args.get(2));
-                    } else {
-                        RespEncoder.encode(RespMessage.error("ERR wrong number of arguments for 'auth' command"), out);
+                // Handle AUTH command (supports both AUTH <pass/token> and AUTH <user/db> <pass>)
+                if ("AUTH".equals(cmdName)) {
+                    // 1. Check if authenticating against a virtual DatabaseInstance (e.g. from Prisma URL)
+                    if (virtualDbManager != null) {
+                        com.myredis.storage.DatabaseInstance matchedDb = null;
+                        if (args.size() == 2) {
+                            matchedDb = virtualDbManager.resolveDatabaseByAuth(null, args.get(1));
+                        } else if (args.size() >= 3) {
+                            matchedDb = virtualDbManager.resolveDatabaseByAuth(args.get(1), args.get(2));
+                        }
+
+                        if (matchedDb != null) {
+                            currentStorage = matchedDb.getStorage();
+                            if (aclEngine != null) {
+                                authenticatedUser = aclEngine.getDefaultAdminUser();
+                            }
+                            RespEncoder.encode(RespMessage.OK, out);
+                            out.flush();
+                            continue;
+                        }
+                    }
+
+                    // 2. Check if authenticating against ACL user accounts
+                    if (aclEngine != null) {
+                        com.myredis.security.User u = null;
+                        if (args.size() == 2) {
+                            u = aclEngine.authenticateSingleTokenOrPass(args.get(1));
+                        } else if (args.size() == 3) {
+                            u = aclEngine.authenticate(args.get(1), args.get(2));
+                        } else {
+                            RespEncoder.encode(RespMessage.error("ERR wrong number of arguments for 'auth' command"), out);
+                            out.flush();
+                            continue;
+                        }
+
+                        if (u != null) {
+                            authenticatedUser = u;
+                            if (virtualDbManager != null) {
+                                currentStorage = virtualDbManager.getStorageForUser(u.getUsername());
+                            }
+                            RespEncoder.encode(RespMessage.OK, out);
+                        } else {
+                            RespEncoder.encode(RespMessage.error("WRONGPASS invalid username-password pair or user is disabled."), out);
+                        }
                         out.flush();
                         continue;
                     }
-
-                    if (u != null) {
-                        authenticatedUser = u;
-                        if (virtualDbManager != null) {
-                            currentStorage = virtualDbManager.getStorageForUser(u.getUsername());
-                        }
-                        RespEncoder.encode(RespMessage.OK, out);
-                    } else {
-                        RespEncoder.encode(RespMessage.error("WRONGPASS invalid username-password pair or user is disabled."), out);
-                    }
-                    out.flush();
-                    continue;
                 }
 
                 // Handle SELECT command for database switching
