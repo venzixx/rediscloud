@@ -1,10 +1,14 @@
 // Redis Studio - Database Console Client Engine
-let allKeys = [];
-let filteredKeys = [];
+let currentPage = 1;
+let pageSize = 50;
+let totalRecords = 0;
+let totalPages = 1;
+let currentPageKeys = [];
 let selectedKeys = new Set();
 let activeTypeFilter = 'ALL';
 let activeNamespace = null;
 let currentSort = 'key_asc';
+let currentSearch = '';
 let pollTimer = null;
 let activeInspectKey = null;
 let inspectCache = null;
@@ -12,6 +16,7 @@ let inspectCache = null;
 document.addEventListener('DOMContentLoaded', () => {
     initNavigation();
     initDatasheetToolbar();
+    initPagination();
     initInspector();
     initTerminalDrawer();
     initInsertModal();
@@ -43,10 +48,11 @@ function initNavigation() {
                 if (item.dataset.typeFilter) {
                     activeTypeFilter = item.dataset.typeFilter;
                     activeNamespace = null;
+                    currentPage = 1;
                     document.querySelectorAll('.tree-folder').forEach(f => f.classList.remove('active'));
                 }
                 updateBreadcrumb();
-                applyFilterAndRender();
+                fetchKeys();
             } else if (targetPaneId === 'pane-cloud-api') {
                 updateBreadcrumb('Cloud REST API & RLS');
                 loadAclUsers();
@@ -57,7 +63,7 @@ function initNavigation() {
     });
 
     document.getElementById('refreshNamespacesBtn').addEventListener('click', () => {
-        buildNamespaceTree(allKeys);
+        fetchKeys();
         showToast('Refreshed namespaces');
     });
 
@@ -71,6 +77,7 @@ function initNavigation() {
                 showToast('Database flushed');
                 selectedKeys.clear();
                 updateBatchBar();
+                currentPage = 1;
                 fetchKeys();
                 fetchStats();
             }
@@ -94,7 +101,7 @@ function updateBreadcrumb(customTitle) {
 }
 
 // ==========================================
-// Datasheet Filtering & Sorting
+// Datasheet Filtering, Sorting & Toolbar
 // ==========================================
 function initDatasheetToolbar() {
     const searchInput = document.getElementById('filterSearchInput');
@@ -104,17 +111,22 @@ function initDatasheetToolbar() {
     let debounce;
     searchInput.addEventListener('input', () => {
         clearTimeout(debounce);
-        debounce = setTimeout(() => applyFilterAndRender(), 200);
+        debounce = setTimeout(() => {
+            currentSearch = searchInput.value.trim();
+            currentPage = 1;
+            fetchKeys();
+        }, 250);
     });
 
     sortSelect.addEventListener('change', (e) => {
         currentSort = e.target.value;
-        applyFilterAndRender();
+        currentPage = 1;
+        fetchKeys();
     });
 
     selectAllCheck.addEventListener('change', (e) => {
         if (e.target.checked) {
-            filteredKeys.forEach(k => selectedKeys.add(k.key));
+            currentPageKeys.forEach(k => selectedKeys.add(k.key));
         } else {
             selectedKeys.clear();
         }
@@ -170,8 +182,104 @@ function updateBatchBar() {
         countText.textContent = `${selectedKeys.size} record${selectedKeys.size > 1 ? 's' : ''} selected`;
     } else {
         bar.classList.remove('show');
-        selectAllCheck.checked = false;
+        if (selectAllCheck) selectAllCheck.checked = false;
     }
+}
+
+// ==========================================
+// Datasheet Pagination
+// ==========================================
+function initPagination() {
+    const firstBtn = document.getElementById('pagFirstBtn');
+    const prevBtn = document.getElementById('pagPrevBtn');
+    const nextBtn = document.getElementById('pagNextBtn');
+    const lastBtn = document.getElementById('pagLastBtn');
+    const jumpInput = document.getElementById('pagJumpInput');
+    const sizeSelect = document.getElementById('pagPageSizeSelect');
+
+    firstBtn.addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage = 1;
+            fetchKeys();
+        }
+    });
+
+    prevBtn.addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            fetchKeys();
+        }
+    });
+
+    nextBtn.addEventListener('click', () => {
+        if (currentPage < totalPages) {
+            currentPage++;
+            fetchKeys();
+        }
+    });
+
+    lastBtn.addEventListener('click', () => {
+        if (currentPage < totalPages) {
+            currentPage = totalPages;
+            fetchKeys();
+        }
+    });
+
+    jumpInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            let p = parseInt(jumpInput.value, 10);
+            if (!isNaN(p) && p >= 1 && p <= totalPages && p !== currentPage) {
+                currentPage = p;
+                fetchKeys();
+            } else {
+                jumpInput.value = currentPage;
+            }
+        }
+    });
+
+    jumpInput.addEventListener('blur', () => {
+        let p = parseInt(jumpInput.value, 10);
+        if (!isNaN(p) && p >= 1 && p <= totalPages && p !== currentPage) {
+            currentPage = p;
+            fetchKeys();
+        } else {
+            jumpInput.value = currentPage;
+        }
+    });
+
+    sizeSelect.addEventListener('change', (e) => {
+        pageSize = parseInt(e.target.value, 10) || 50;
+        currentPage = 1;
+        fetchKeys();
+    });
+}
+
+function updatePaginationBar() {
+    const rangeInfo = document.getElementById('pagRangeInfo');
+    const curPageNum = document.getElementById('pagCurrentPageNum');
+    const totPageNum = document.getElementById('pagTotalPagesNum');
+    const jumpInput = document.getElementById('pagJumpInput');
+    const firstBtn = document.getElementById('pagFirstBtn');
+    const prevBtn = document.getElementById('pagPrevBtn');
+    const nextBtn = document.getElementById('pagNextBtn');
+    const lastBtn = document.getElementById('pagLastBtn');
+
+    const start = totalRecords === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    const end = Math.min(currentPage * pageSize, totalRecords);
+
+    if (rangeInfo) rangeInfo.textContent = `Showing ${start.toLocaleString()} – ${end.toLocaleString()} of ${totalRecords.toLocaleString()} records`;
+    if (curPageNum) curPageNum.textContent = currentPage.toLocaleString();
+    if (totPageNum) totPageNum.textContent = totalPages.toLocaleString();
+    if (jumpInput) {
+        jumpInput.value = currentPage;
+        jumpInput.max = totalPages;
+    }
+
+    if (firstBtn) firstBtn.disabled = (currentPage <= 1);
+    if (prevBtn) prevBtn.disabled = (currentPage <= 1);
+    if (nextBtn) nextBtn.disabled = (currentPage >= totalPages);
+    if (lastBtn) lastBtn.disabled = (currentPage >= totalPages);
 }
 
 // ==========================================
@@ -179,64 +287,72 @@ function updateBatchBar() {
 // ==========================================
 async function fetchKeys(isSilent = false) {
     try {
-        const res = await fetch('/api/keys');
+        const params = new URLSearchParams({
+            page: currentPage,
+            limit: pageSize,
+            sort: currentSort
+        });
+        if (activeTypeFilter !== 'ALL') params.append('type', activeTypeFilter);
+        if (activeNamespace) params.append('namespace', activeNamespace);
+        if (currentSearch) params.append('pattern', currentSearch);
+
+        const res = await fetch(`/api/keys?${params.toString()}`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        allKeys = data.keys || [];
 
-        updateSidebarCounts(allKeys);
-        buildNamespaceTree(allKeys);
-        applyFilterAndRender();
+        currentPage = data.page || 1;
+        pageSize = data.limit || 50;
+        totalRecords = data.total || 0;
+        totalPages = data.totalPages || 1;
+        currentPageKeys = data.keys || [];
+
+        updateSidebarCounts(data.typeCounts || {});
+        buildNamespaceTree(data.namespaces || []);
+        renderTableRows();
+        updatePaginationBar();
+
+        const counterEl = document.getElementById('recordCounter');
+        if (counterEl) {
+            counterEl.textContent = `Page ${currentPage} of ${totalPages} (${totalRecords.toLocaleString()} records)`;
+        }
     } catch (e) {
         if (!isSilent) {
             const tbody = document.getElementById('datasheetBody');
-            tbody.innerHTML = `<tr><td colspan="8" class="table-empty"><div class="empty-state"><span style="color:#ff6b81;">Error connecting to Redis: ${escapeHtml(e.message)}</span></div></td></tr>`;
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="8" class="table-empty"><div class="empty-state"><span style="color:#ff6b81;">Error connecting to Redis: ${escapeHtml(e.message)}</span></div></td></tr>`;
+            }
         }
     }
 }
 
-function updateSidebarCounts(keys) {
-    let strCount = 0, hshCount = 0, lstCount = 0, setCount = 0;
-    keys.forEach(k => {
-        switch (k.type) {
-            case 'string': strCount++; break;
-            case 'hash': hshCount++; break;
-            case 'list': lstCount++; break;
-            case 'set': setCount++; break;
-        }
-    });
+function updateSidebarCounts(counts) {
+    const elAll = document.getElementById('countAll');
+    const elStr = document.getElementById('countStrings');
+    const elHsh = document.getElementById('countHashes');
+    const elLst = document.getElementById('countLists');
+    const elSet = document.getElementById('countSets');
 
-    document.getElementById('countAll').textContent = keys.length;
-    document.getElementById('countStrings').textContent = strCount;
-    document.getElementById('countHashes').textContent = hshCount;
-    document.getElementById('countLists').textContent = lstCount;
-    document.getElementById('countSets').textContent = setCount;
+    if (elAll) elAll.textContent = (counts.ALL || 0).toLocaleString();
+    if (elStr) elStr.textContent = (counts.string || 0).toLocaleString();
+    if (elHsh) elHsh.textContent = (counts.hash || 0).toLocaleString();
+    if (elLst) elLst.textContent = (counts.list || 0).toLocaleString();
+    if (elSet) elSet.textContent = (counts.set || 0).toLocaleString();
 }
 
-function buildNamespaceTree(keys) {
+function buildNamespaceTree(namespaces) {
     const host = document.getElementById('namespaceTreeList');
-    const namespaces = {};
+    if (!host) return;
 
-    keys.forEach(k => {
-        const idx = k.key.indexOf(':');
-        if (idx > 0) {
-            const ns = k.key.substring(0, idx + 1);
-            namespaces[ns] = (namespaces[ns] || 0) + 1;
-        }
-    });
-
-    const entries = Object.entries(namespaces);
-    if (entries.length === 0) {
+    if (!namespaces || namespaces.length === 0) {
         host.innerHTML = '<div class="tree-item empty">No namespaces (: delimiter)</div>';
         return;
     }
 
-    entries.sort((a, b) => a[0].localeCompare(b[0]));
-    host.innerHTML = entries.map(([ns, count]) => `
-        <div class="tree-folder ${activeNamespace === ns ? 'active' : ''}" data-ns="${escapeHtml(ns)}">
+    host.innerHTML = namespaces.map(item => `
+        <div class="tree-folder ${activeNamespace === item.name ? 'active' : ''}" data-ns="${escapeHtml(item.name)}">
             <iconify-icon icon="lucide:folder" class="f-icon" width="13"></iconify-icon>
-            <span class="f-name">${escapeHtml(ns)}</span>
-            <span class="f-count">${count}</span>
+            <span class="f-name">${escapeHtml(item.name)}</span>
+            <span class="f-count">${item.count.toLocaleString()}</span>
         </div>
     `).join('');
 
@@ -251,58 +367,18 @@ function buildNamespaceTree(keys) {
                 el.classList.add('active');
                 activeNamespace = ns;
             }
+            currentPage = 1;
             updateBreadcrumb();
-            applyFilterAndRender();
+            fetchKeys();
         });
     });
 }
 
-function applyFilterAndRender() {
-    const searchVal = document.getElementById('filterSearchInput').value.trim().toLowerCase();
-
-    filteredKeys = allKeys.filter(k => {
-        // Type filter
-        if (activeTypeFilter !== 'ALL' && k.type.toLowerCase() !== activeTypeFilter.toLowerCase()) {
-            return false;
-        }
-
-        // Namespace filter
-        if (activeNamespace && !k.key.startsWith(activeNamespace)) {
-            return false;
-        }
-
-        // Search text / pattern
-        if (searchVal) {
-            const cleanPattern = searchVal.replace(/\*/g, '');
-            if (!k.key.toLowerCase().includes(cleanPattern)) {
-                return false;
-            }
-        }
-
-        return true;
-    });
-
-    // Sort
-    filteredKeys.sort((a, b) => {
-        switch (currentSort) {
-            case 'key_desc': return b.key.localeCompare(a.key);
-            case 'size_desc': return b.size - a.size;
-            case 'ttl_asc': return (a.ttl === -1 ? 999999999 : a.ttl) - (b.ttl === -1 ? 999999999 : b.ttl);
-            case 'created_desc': return b.createdAt - a.createdAt;
-            case 'key_asc':
-            default:
-                return a.key.localeCompare(b.key);
-        }
-    });
-
-    document.getElementById('recordCounter').textContent = `Showing ${filteredKeys.length} of ${allKeys.length} records`;
-    renderTableRows();
-}
-
 function renderTableRows() {
     const tbody = document.getElementById('datasheetBody');
+    if (!tbody) return;
 
-    if (filteredKeys.length === 0) {
+    if (currentPageKeys.length === 0) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="8" class="table-empty">
@@ -320,19 +396,20 @@ function renderTableRows() {
         return;
     }
 
-    tbody.innerHTML = filteredKeys.map((k, index) => {
+    tbody.innerHTML = currentPageKeys.map((k, index) => {
         const isChecked = selectedKeys.has(k.key);
         const typeClass = getTypeBadgeClass(k.type);
         const ttlLabel = k.ttl === -1 ? 'Persistent' : (k.ttl <= 0 ? 'Expired' : `${k.ttl}s remaining`);
         const ttlClass = k.ttl > 0 ? 'expiring' : '';
         const sizeLabel = k.type === 'string' ? `${k.size} B` : `${k.size} items`;
+        const globalIndex = (currentPage - 1) * pageSize + index + 1;
 
         return `
             <tr class="${isChecked ? 'selected' : ''}" data-key="${escapeHtml(k.key)}">
                 <td class="col-checkbox">
                     <input type="checkbox" class="row-checkbox" data-key="${escapeHtml(k.key)}" ${isChecked ? 'checked' : ''}>
                 </td>
-                <td class="col-num">${index + 1}</td>
+                <td class="col-num">${globalIndex}</td>
                 <td class="col-key">
                     <span class="key-clickable" onclick="openInspector('${escapeHtml(k.key)}')">
                         ${escapeHtml(k.key)}

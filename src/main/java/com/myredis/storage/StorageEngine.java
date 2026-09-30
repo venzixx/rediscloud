@@ -621,6 +621,162 @@ public class StorageEngine {
         return details;
     }
 
+    public record KeyPageResult(
+            int page,
+            int limit,
+            int total,
+            int totalPages,
+            Map<String, Integer> typeCounts,
+            List<Map<String, Object>> namespaces,
+            List<Map<String, Object>> keys
+    ) {}
+
+    private record KeyCandidate(String key, DataType type, int size, long ttl, long createdAt) {}
+
+    public KeyPageResult queryKeys(String pattern, String typeFilter, String namespace, String sort, int page, int limit) {
+        cleanExpiredKeys();
+        long now = System.currentTimeMillis();
+
+        Map<String, Integer> typeCounts = new LinkedHashMap<>();
+        typeCounts.put("ALL", 0);
+        typeCounts.put("string", 0);
+        typeCounts.put("hash", 0);
+        typeCounts.put("list", 0);
+        typeCounts.put("set", 0);
+
+        Map<String, Integer> nsCounts = new HashMap<>();
+        List<KeyCandidate> candidates = new ArrayList<>();
+
+        for (Map.Entry<String, RedisEntry> e : map.entrySet()) {
+            String key = e.getKey();
+            RedisEntry entry = e.getValue();
+            if (entry.isExpired(now)) continue;
+
+            String typeName = entry.getType().getRedisName();
+            typeCounts.put("ALL", typeCounts.get("ALL") + 1);
+            typeCounts.computeIfPresent(typeName, (k, v) -> v + 1);
+
+            int colonIdx = key.indexOf(':');
+            if (colonIdx > 0 && colonIdx < 40) {
+                String ns = key.substring(0, colonIdx + 1);
+                nsCounts.put(ns, nsCounts.getOrDefault(ns, 0) + 1);
+            }
+
+            // Filtering
+            if (typeFilter != null && !typeFilter.equalsIgnoreCase("ALL") && !typeFilter.equalsIgnoreCase(typeName)) {
+                continue;
+            }
+            if (namespace != null && !namespace.isBlank() && !key.startsWith(namespace)) {
+                continue;
+            }
+            if (pattern != null && !pattern.equals("*") && !pattern.isBlank()) {
+                if (!matchesFilterPattern(key, pattern)) {
+                    continue;
+                }
+            }
+
+            int size = switch (entry.getType()) {
+                case STRING -> entry.asString().length();
+                case HASH -> entry.asHash().size();
+                case LIST -> entry.asList().size();
+                case SET -> entry.asSet().size();
+                default -> 0;
+            };
+
+            candidates.add(new KeyCandidate(key, entry.getType(), size, entry.getTtlSeconds(now), entry.getCreatedAtMillis()));
+        }
+
+        // Top Namespaces
+        List<Map<String, Object>> topNamespaces = nsCounts.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .limit(40)
+                .map(e -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("name", e.getKey());
+                    m.put("count", e.getValue());
+                    return m;
+                })
+                .toList();
+
+        // Sort candidates
+        Comparator<KeyCandidate> comparator = switch (sort != null ? sort : "key_asc") {
+            case "key_desc" -> Comparator.comparing(KeyCandidate::key, String.CASE_INSENSITIVE_ORDER).reversed();
+            case "size_desc" -> Comparator.comparingInt(KeyCandidate::size).reversed().thenComparing(KeyCandidate::key, String.CASE_INSENSITIVE_ORDER);
+            case "ttl_asc" -> Comparator.comparingLong((KeyCandidate c) -> c.ttl() == -1 ? Long.MAX_VALUE : c.ttl()).thenComparing(KeyCandidate::key, String.CASE_INSENSITIVE_ORDER);
+            case "created_desc" -> Comparator.comparingLong(KeyCandidate::createdAt).reversed().thenComparing(KeyCandidate::key, String.CASE_INSENSITIVE_ORDER);
+            case "key_asc" -> Comparator.comparing(KeyCandidate::key, String.CASE_INSENSITIVE_ORDER);
+            default -> Comparator.comparing(KeyCandidate::key, String.CASE_INSENSITIVE_ORDER);
+        };
+        candidates.sort(comparator);
+
+        int total = candidates.size();
+        int safeLimit = Math.max(5, Math.min(500, limit));
+        int totalPages = Math.max(1, (int) Math.ceil((double) total / safeLimit));
+        int safePage = Math.max(1, Math.min(page, totalPages));
+
+        int startIndex = (safePage - 1) * safeLimit;
+        int endIndex = Math.min(startIndex + safeLimit, total);
+
+        List<Map<String, Object>> paginatedKeys = new ArrayList<>();
+        if (startIndex < total) {
+            for (KeyCandidate c : candidates.subList(startIndex, endIndex)) {
+                RedisEntry entry = map.get(c.key());
+                if (entry == null || entry.isExpired(now)) continue;
+
+                Map<String, Object> meta = new LinkedHashMap<>();
+                meta.put("key", c.key());
+                meta.put("type", c.type().getRedisName());
+                meta.put("size", c.size());
+                meta.put("ttl", c.ttl());
+                meta.put("createdAt", c.createdAt());
+
+                String preview = "";
+                switch (c.type()) {
+                    case STRING -> {
+                        String str = entry.asString();
+                        preview = str.length() > 60 ? str.substring(0, 57) + "..." : str;
+                    }
+                    case HASH -> {
+                        Map<String, String> h = entry.asHash();
+                        preview = h.entrySet().stream().limit(3)
+                                .map(kv -> kv.getKey() + ": " + kv.getValue())
+                                .reduce((a, b) -> a + ", " + b).orElse("{}");
+                        if (h.size() > 3) preview += ", ...";
+                    }
+                    case LIST -> {
+                        List<String> l = entry.asList();
+                        preview = "[" + l.stream().limit(3).reduce((a, b) -> a + ", " + b).orElse("") + (l.size() > 3 ? ", ..." : "") + "]";
+                    }
+                    case SET -> {
+                        Set<String> s = entry.asSet();
+                        preview = "{" + s.stream().limit(3).reduce((a, b) -> a + ", " + b).orElse("") + (s.size() > 3 ? ", ..." : "") + "}";
+                    }
+                    default -> {}
+                }
+                meta.put("preview", preview);
+                paginatedKeys.add(meta);
+            }
+        }
+
+        return new KeyPageResult(safePage, safeLimit, total, totalPages, typeCounts, topNamespaces, paginatedKeys);
+    }
+
+    private boolean matchesFilterPattern(String key, String pattern) {
+        String lowerKey = key.toLowerCase();
+        String lowerPat = pattern.toLowerCase();
+        if (lowerPat.equals("*")) return true;
+        if (lowerPat.startsWith("*") && lowerPat.endsWith("*") && lowerPat.length() > 2) {
+            return lowerKey.contains(lowerPat.substring(1, lowerPat.length() - 1));
+        }
+        if (lowerPat.endsWith("*")) {
+            return lowerKey.startsWith(lowerPat.substring(0, lowerPat.length() - 1));
+        }
+        if (lowerPat.startsWith("*")) {
+            return lowerKey.endsWith(lowerPat.substring(1));
+        }
+        return lowerKey.contains(lowerPat);
+    }
+
     public List<Map<String, Object>> getAllKeysMetadata() {
         cleanExpiredKeys();
         List<Map<String, Object>> list = new ArrayList<>();

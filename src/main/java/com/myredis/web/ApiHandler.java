@@ -90,32 +90,18 @@ public class ApiHandler implements HttpHandler {
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
         String pattern = queryParams.getOrDefault("pattern", "*");
         String typeFilter = queryParams.get("type");
+        String namespace = queryParams.get("namespace");
+        String sort = queryParams.getOrDefault("sort", "key_asc");
 
-        List<Map<String, Object>> allKeys = storage.getAllKeysMetadata();
-        List<Map<String, Object>> filtered = new ArrayList<>();
+        int page = 1;
+        int limit = 50;
+        try {
+            if (queryParams.containsKey("page")) page = Math.max(1, Integer.parseInt(queryParams.get("page")));
+            if (queryParams.containsKey("limit")) limit = Math.max(5, Math.min(500, Integer.parseInt(queryParams.get("limit"))));
+        } catch (NumberFormatException ignored) {}
 
-        for (Map<String, Object> meta : allKeys) {
-            String key = (String) meta.get("key");
-            String type = (String) meta.get("type");
-
-            if (typeFilter != null && !typeFilter.equalsIgnoreCase("ALL") && !typeFilter.equalsIgnoreCase(type)) {
-                continue;
-            }
-
-            if (!pattern.equals("*") && !key.toLowerCase().contains(pattern.toLowerCase().replace("*", ""))) {
-                continue;
-            }
-
-            filtered.add(meta);
-        }
-
-        // Sort by key name
-        filtered.sort(Comparator.comparing(m -> (String) m.get("key")));
-
-        sendJson(exchange, 200, Map.of(
-                "total", filtered.size(),
-                "keys", filtered
-        ));
+        StorageEngine.KeyPageResult result = storage.queryKeys(pattern, typeFilter, namespace, sort, page, limit);
+        sendJson(exchange, 200, result);
     }
 
     private void handleGetKey(HttpExchange exchange) throws IOException {

@@ -1439,3 +1439,103 @@ input:checked + .slider-sm:before { transform: translateX(12px); background-colo
     color: var(--text-dim);
 }
 
+/* ==========================================
+   Datasheet Pagination Bar
+   ========================================== */
+.datasheet-pagination-bar {
+    background-color: var(--bg-toolbar);
+    border-top: 1px solid var(--border);
+    padding: 0.55rem 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    user-select: none;
+    z-index: 10;
+    min-height: 46px;
+    flex-shrink: 0;
+}
+
+.pag-left, .pag-right, .pag-center {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.pag-range-info {
+    color: var(--text-muted);
+    font-weight: 500;
+    font-size: 0.78rem;
+}
+
+.pag-size-select-group, .pag-jump-group {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.pag-lbl {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+}
+
+.pag-select {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.78rem;
+    height: 28px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-main);
+    cursor: pointer;
+}
+
+.pag-input {
+    width: 55px;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.78rem;
+    height: 28px;
+    text-align: center;
+    border-radius: 6px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    font-family: var(--font-mono);
+}
+
+.pag-page-indicator {
+    color: var(--text-main);
+    font-size: 0.8rem;
+}
+
+.pag-page-indicator strong {
+    color: var(--accent-blue);
+    font-family: var(--font-mono);
+}
+
+.pag-btn {
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    border-radius: 6px;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.pag-btn:hover:not(:disabled) {
+    background: var(--bg-cell-hover);
+    border-color: var(--border-focus);
+    color: #fff;
+}
+
+.pag-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+
