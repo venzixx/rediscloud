@@ -42,7 +42,7 @@ public class Main {
             redisServer.start();
 
             // 6. Start Web Management Server (port 8080)
-            WebServer webServer = new WebServer(config.getHost(), config.getWebPort(), config.getRedisPort(), storage, registry, aclEngine, virtualDbManager, accountManager);
+            WebServer webServer = new WebServer(config.getHost(), config.getWebPort(), config.getRedisPort(), storage, registry, aclEngine, virtualDbManager, accountManager, config);
             webServer.start();
 
             // Graceful shutdown hook

@@ -22,7 +22,7 @@ EXPOSE 6379 8080
 # Persistent data directory for AOF, accounts, and databases
 VOLUME ["/app/data"]
 
-COPY --from=builder /build/target/redis-java-1.0.0.jar /app/redis-java.jar
+COPY --from=builder /build/target/redis-java-*.jar /app/redis-java.jar
 
 ENV REDIS_PORT=6379
 ENV WEB_PORT=8080

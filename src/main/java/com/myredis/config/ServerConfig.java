@@ -12,14 +12,23 @@ public class ServerConfig {
     private final boolean aofEnabled;
     private final String aofPath;
     private final long expiryIntervalMillis;
+    private final String publicHost;
+    private final String vpcPrivateIp;
 
-    public ServerConfig(String host, int redisPort, int webPort, boolean aofEnabled, String aofPath, long expiryIntervalMillis) {
+    public ServerConfig(String host, int redisPort, int webPort, boolean aofEnabled, String aofPath,
+                        long expiryIntervalMillis, String publicHost, String vpcPrivateIp) {
         this.host = host;
         this.redisPort = redisPort;
         this.webPort = webPort;
         this.aofEnabled = aofEnabled;
         this.aofPath = aofPath;
         this.expiryIntervalMillis = expiryIntervalMillis;
+        this.publicHost = publicHost;
+        this.vpcPrivateIp = vpcPrivateIp != null ? vpcPrivateIp : detectVpcPrivateIp();
+    }
+
+    public ServerConfig(String host, int redisPort, int webPort, boolean aofEnabled, String aofPath, long expiryIntervalMillis) {
+        this(host, redisPort, webPort, aofEnabled, aofPath, expiryIntervalMillis, null, null);
     }
 
     public static ServerConfig load() {
@@ -33,7 +42,10 @@ public class ServerConfig {
         String aofPath = getEnvOrDefault("AOF_PATH", "data/appendonly.aof");
         long expiryInterval = getLongEnvOrDefault("EXPIRY_INTERVAL_MS", 200L);
 
-        return new ServerConfig(host, redisPort, webPort, aofEnabled, aofPath, expiryInterval);
+        String publicHost = getEnvOrDefault("PUBLIC_HOST", getEnvOrDefault("REDIS_PUBLIC_HOST", getEnvOrDefault("REDIS_PUBLIC_IP", null)));
+        String vpcPrivateIp = detectVpcPrivateIp();
+
+        return new ServerConfig(host, redisPort, webPort, aofEnabled, aofPath, expiryInterval, publicHost, vpcPrivateIp);
     }
 
     private static String getEnvOrDefault(String key, String def) {
@@ -86,5 +98,37 @@ public class ServerConfig {
 
     public long getExpiryIntervalMillis() {
         return expiryIntervalMillis;
+    }
+
+    public String getPublicHost() {
+        return publicHost;
+    }
+
+    public String getVpcPrivateIp() {
+        return vpcPrivateIp;
+    }
+
+    public static String detectVpcPrivateIp() {
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
+            if (interfaces != null) {
+                while (interfaces.hasMoreElements()) {
+                    java.net.NetworkInterface nif = interfaces.nextElement();
+                    if (nif.isLoopback() || !nif.isUp()) continue;
+                    java.util.Enumeration<java.net.InetAddress> addresses = nif.getInetAddresses();
+                    while (addresses.hasMoreElements()) {
+                        java.net.InetAddress addr = addresses.nextElement();
+                        if (!addr.isLoopbackAddress() && addr instanceof java.net.Inet4Address) {
+                            return addr.getHostAddress();
+                        }
+                    }
+                }
+            }
+            java.net.InetAddress local = java.net.InetAddress.getLocalHost();
+            if (local != null && !local.isLoopbackAddress()) {
+                return local.getHostAddress();
+            }
+        } catch (Exception ignored) {}
+        return "127.0.0.1";
     }
 }

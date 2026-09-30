@@ -42,7 +42,7 @@ Download the executable JAR from the [Releases](https://github.com/venzixx/redis
 
 ```bash
 # Requires OpenJDK 25 installed
-java -jar redis-java-1.0.0.jar
+java -jar redis-java-1.0.1.jar
 ```
 
 * **Redis Port**: `6379` (TCP Socket / RESP Protocol)
@@ -76,14 +76,14 @@ Access the Cloud Studio at `http://localhost:8080`.
 git clone https://github.com/venzixx/rediscloud.git
 cd rediscloud
 
-# Run unit tests (30/30 tests)
+# Run unit tests (35/35 tests)
 mvn test
 
 # Package standalone executable fat JAR
 mvn clean package -DskipTests
 
 # Start the server
-java -jar target/redis-java-1.0.0.jar
+java -jar target/redis-java-1.0.1.jar
 ```
 
 ---
@@ -98,6 +98,36 @@ On first launch, a superadmin account is initialized:
 * **Database Password**: `sec_admin_cache_99`
 
 > **Note**: Normal visitors see a public SaaS landing page with real registration and sign-in. Superadmin tools (such as system user management) are strictly restricted to `admin@gmail.com` or accounts with the `admin` role.
+
+---
+
+## 🌐 Public Access, IP Routing & VPC Reachability
+
+Redis Cloud is designed from the ground up for seamless connectivity from outer apps across the public internet, VPC subnets, and container networks.
+
+### 1. Connecting Outer Apps (Vercel, Next.js, AWS Lambda, External Servers)
+When deploying Redis Cloud on an AWS EC2 instance, GCP VM, DigitalOcean droplet, or VPS, outer apps running elsewhere (such as serverless functions on Vercel) need to reach your Redis instance:
+* **Server Interface Binding**: Binds by default to `0.0.0.0` (all network interfaces).
+* **Public Host Configuration**: Set `PUBLIC_HOST` (or `REDIS_PUBLIC_HOST` / `REDIS_PUBLIC_IP`) to your server's public IP or domain name:
+  ```bash
+  export PUBLIC_HOST="redis.yourcompany.com"   # or "54.210.12.34"
+  java -jar redis-java-1.0.1.jar
+  ```
+  The Web Studio and REST API will automatically generate production-ready connection strings with this host.
+
+### 2. Multi-Mode IP Routing Selector (in Web Studio)
+The Web Studio **Connect** modal features an interactive **IP Routing Selector**:
+* 🌐 **Public IP / Domain**: Direct public internet routing for outer apps (Vercel, Heroku, external clouds, local dev connecting to remote).
+* 🏢 **VPC / Private Network**: Internal subnet routing (e.g. `10.0.1.5` or `172.31.x.x`) for low-latency interconnects within the same cloud provider, AWS VPC Peering, or Docker network.
+* ⚙️ **Custom Host / Domain**: Use a custom domain name, CNAME, or load balancer reverse proxy.
+* 💻 **Localhost (`127.0.0.1`)**: Loopback routing for sidecars and local testing.
+
+### 3. Database IP Routing Firewall (CIDR Allowlist)
+To secure public-facing databases against unauthorized access, each database includes built-in IP allowlisting:
+* **Default (`0.0.0.0/0`)**: Open access for serverless outer apps whose IP addresses change dynamically (Vercel, Supabase).
+* **VPC Subnet Restriction**: Restrict access exclusively to internal subnets (e.g. `10.0.0.0/16` or `192.168.1.0/24`).
+* **Static NAT IPs**: Allow only specific corporate egress or gateway IP addresses.
+* **Firewall Enforcement**: Unauthorized IP connection attempts are blocked directly at the TCP socket layer with `-ERR Access denied: Client IP is not permitted by database IP routing allowlist`.
 
 ---
 
@@ -214,7 +244,7 @@ rediscloud/
 │   ├── storage/             # VirtualDatabaseManager, StorageEngine & AOF persistence
 │   └── web/                 # Web server, Auth API, and Edge REST endpoints
 ├── src/main/resources/web/   # Web Cloud Studio frontend (HTML, Tailwind CSS, JS)
-├── src/test/java/com/myredis/# JUnit test suite (30 unit & integration tests)
+├── src/test/java/com/myredis/# JUnit test suite (35 unit & integration tests)
 ├── Dockerfile               # Multi-stage production container build
 ├── pom.xml                  # Maven dependencies & shaded fat JAR configuration
 └── README.md

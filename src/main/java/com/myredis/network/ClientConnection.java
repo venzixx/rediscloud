@@ -27,6 +27,7 @@ public class ClientConnection implements Runnable {
     private final com.myredis.storage.VirtualDatabaseManager virtualDbManager;
     private com.myredis.security.User authenticatedUser;
     private volatile StorageEngine currentStorage;
+    private volatile com.myredis.storage.DatabaseInstance currentDatabase;
 
     public ClientConnection(Socket socket, StorageEngine storage, CommandRegistry registry, com.myredis.security.AclEngine aclEngine, com.myredis.storage.VirtualDatabaseManager virtualDbManager) {
         this.socket = socket;
@@ -99,6 +100,13 @@ public class ClientConnection implements Runnable {
                         }
 
                         if (matchedDb != null) {
+                            String clientIp = getClientIp();
+                            if (!matchedDb.isIpAllowed(clientIp)) {
+                                RespEncoder.encode(RespMessage.error("ERR Access denied: Client IP '" + clientIp + "' is not permitted by database IP routing allowlist (CIDR restriction)"), out);
+                                out.flush();
+                                continue;
+                            }
+                            currentDatabase = matchedDb;
                             currentStorage = matchedDb.getStorage();
                             if (aclEngine != null) {
                                 authenticatedUser = aclEngine.getDefaultAdminUser();
@@ -150,6 +158,16 @@ public class ClientConnection implements Runnable {
                     continue;
                 }
 
+                // Enforce Database IP Routing firewall
+                if (currentDatabase != null) {
+                    String clientIp = getClientIp();
+                    if (!currentDatabase.isIpAllowed(clientIp)) {
+                        RespEncoder.encode(RespMessage.error("ERR Access denied: Client IP '" + clientIp + "' blocked by database IP routing firewall"), out);
+                        out.flush();
+                        continue;
+                    }
+                }
+
                 // Enforce ACL & RLS
                 if (aclEngine != null) {
                     try {
@@ -170,5 +188,17 @@ public class ClientConnection implements Runnable {
         } finally {
             storage.getMetrics().clientDisconnected();
         }
+    }
+
+    private String getClientIp() {
+        try {
+            if (socket.getInetAddress() != null) {
+                String ip = socket.getInetAddress().getHostAddress();
+                if (ip.startsWith("/")) ip = ip.substring(1);
+                if (ip.startsWith("::ffff:")) ip = ip.substring(7);
+                return ip;
+            }
+        } catch (Exception ignored) {}
+        return "127.0.0.1";
     }
 }

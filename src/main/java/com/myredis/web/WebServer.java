@@ -24,11 +24,12 @@ public class WebServer {
     private final AclEngine aclEngine;
     private final VirtualDatabaseManager virtualDbManager;
     private final com.myredis.security.AccountManager accountManager;
+    private final com.myredis.config.ServerConfig config;
     private HttpServer server;
 
     public WebServer(String host, int port, int redisPort, StorageEngine storage,
                      CommandRegistry registry, AclEngine aclEngine, VirtualDatabaseManager virtualDbManager,
-                     com.myredis.security.AccountManager accountManager) {
+                     com.myredis.security.AccountManager accountManager, com.myredis.config.ServerConfig config) {
         this.host = host;
         this.port = port;
         this.redisPort = redisPort > 0 ? redisPort : 6379;
@@ -37,29 +38,42 @@ public class WebServer {
         this.aclEngine = aclEngine;
         this.virtualDbManager = virtualDbManager;
         this.accountManager = accountManager;
+        this.config = config;
+    }
+
+    public WebServer(String host, int port, int redisPort, StorageEngine storage,
+                     CommandRegistry registry, AclEngine aclEngine, VirtualDatabaseManager virtualDbManager,
+                     com.myredis.security.AccountManager accountManager) {
+        this(host, port, redisPort, storage, registry, aclEngine, virtualDbManager, accountManager, null);
     }
 
     public WebServer(String host, int port, int redisPort, StorageEngine storage,
                      CommandRegistry registry, AclEngine aclEngine, VirtualDatabaseManager virtualDbManager) {
-        this(host, port, redisPort, storage, registry, aclEngine, virtualDbManager, null);
+        this(host, port, redisPort, storage, registry, aclEngine, virtualDbManager, null, null);
     }
 
     public WebServer(String host, int port, StorageEngine storage, CommandRegistry registry, AclEngine aclEngine) {
-        this(host, port, 6379, storage, registry, aclEngine, null, null);
+        this(host, port, 6379, storage, registry, aclEngine, null, null, null);
     }
 
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(host, port), 0);
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
 
-        server.createContext("/v1/", new CloudApiHandler(storage, registry, aclEngine, virtualDbManager, redisPort, port));
-        server.createContext("/api/", new ApiHandler(storage, registry, aclEngine, virtualDbManager, accountManager, redisPort, port));
+        server.createContext("/v1/", new CloudApiHandler(storage, registry, aclEngine, virtualDbManager, redisPort, port, config));
+        server.createContext("/api/", new ApiHandler(storage, registry, aclEngine, virtualDbManager, accountManager, redisPort, port, config));
         server.createContext("/", new StaticResourceHandler());
 
         server.start();
         String displayHost = (host.equals("0.0.0.0") ? "localhost" : host);
+        String publicIp = (config != null && config.getPublicHost() != null) ? config.getPublicHost() : null;
+        String vpcIp = (config != null) ? config.getVpcPrivateIp() : com.myredis.config.ServerConfig.detectVpcPrivateIp();
         System.out.println("=================================================");
         System.out.println("  * Web Studio:    http://" + displayHost + ":" + port);
+        if (publicIp != null) {
+            System.out.println("  * Public Host:   http://" + publicIp + ":" + port + " (Redis: " + publicIp + ":" + redisPort + ")");
+        }
+        System.out.println("  * VPC / LAN IP:  " + vpcIp + " (Redis: " + vpcIp + ":" + redisPort + ")");
         System.out.println("  * Cloud KV API:  http://" + displayHost + ":" + port + "/v1/");
         System.out.println("  * REST API:      http://" + displayHost + ":" + port + "/api/stats");
         System.out.println("=================================================");

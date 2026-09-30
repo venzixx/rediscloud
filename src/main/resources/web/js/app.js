@@ -33,6 +33,19 @@ let activeDatabaseRole = 'OWNER';
 let activeDbTab = 'my';
 let activeShareDbId = null;
 
+// Network & IP Routing State
+let networkInfo = {
+    publicHost: window.location.hostname || 'localhost',
+    vpcPrivateIp: '10.0.0.1',
+    clientIp: '127.0.0.1',
+    requestHost: window.location.hostname || 'localhost',
+    redisPort: 6379,
+    webPort: window.location.port || '8080',
+    routingOptions: []
+};
+let selectedRouteMode = 'public';
+let selectedRouteHost = window.location.hostname || 'localhost';
+
 // Wrap window.fetch to automatically include Authorization token
 const originalFetch = window.fetch;
 window.fetch = async function(url, options = {}) {
@@ -108,6 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initBenchmarkEngine();
     initTenantsPanel();
     initConnectModal();
+    initNetworkRouting();
     initOverviewDashboard();
     initAnalyticsPage();
     initTeamPage();
@@ -1689,7 +1703,14 @@ function renderDatabaseCards() {
                     </div>
                     <div class="flex justify-between">
                         <span>Memory:</span>
-                        <span class="text-gray-900 font-semibold">${formatBytes(db.memoryUsage || 0)}</span>
+                        <span class="text-gray-900 font-semibold">${formatBytes(db.memoryUsage || db.memoryBytes || 0)}</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span>IP Routing:</span>
+                        <span class="inline-flex items-center gap-1 ${db.isPublicAccess !== false ? 'text-emerald-600 font-semibold' : 'text-amber-600 font-semibold'}">
+                            <iconify-icon icon="${db.isPublicAccess !== false ? 'lucide:globe' : 'lucide:shield'}" width="12"></iconify-icon>
+                            <span>${db.isPublicAccess !== false ? 'Public (0.0.0.0/0)' : 'VPC Restricted'}</span>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -1925,6 +1946,124 @@ function initConnectModal() {
         });
     }
 
+    // IP Routing Selector Controls
+    const routeButtons = document.querySelectorAll('.route-mode-btn');
+    const routeHostInp = document.getElementById('routeHostInput');
+    const routeBadge = document.getElementById('routeStatusBadge');
+    const routeDesc = document.getElementById('routeDescText');
+
+    routeButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            selectedRouteMode = btn.dataset.mode;
+            routeButtons.forEach(b => {
+                b.classList.remove('bg-white', 'shadow-xs', 'text-purple-700', 'font-semibold');
+                b.classList.add('text-gray-600');
+            });
+            btn.classList.add('bg-white', 'shadow-xs', 'text-purple-700', 'font-semibold');
+            btn.classList.remove('text-gray-600');
+
+            if (selectedRouteMode === 'public') {
+                selectedRouteHost = networkInfo.publicHost || window.location.hostname || 'localhost';
+                if (routeBadge) {
+                    routeBadge.textContent = 'Public Outer Access';
+                    routeBadge.className = 'text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700';
+                }
+                if (routeDesc) routeDesc.textContent = 'Outer apps (Vercel, Lambda, Node, Python)';
+            } else if (selectedRouteMode === 'vpc') {
+                selectedRouteHost = networkInfo.vpcPrivateIp || '10.0.0.1';
+                if (routeBadge) {
+                    routeBadge.textContent = 'VPC / Internal Subnet';
+                    routeBadge.className = 'text-[10px] px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700';
+                }
+                if (routeDesc) routeDesc.textContent = 'AWS/GCP VPC, Docker network, low-latency private';
+            } else if (selectedRouteMode === 'custom') {
+                selectedRouteHost = routeHostInp.value.trim() || networkInfo.publicHost || 'redis.yourdomain.com';
+                if (routeBadge) {
+                    routeBadge.textContent = 'Custom CNAME / Proxy';
+                    routeBadge.className = 'text-[10px] px-2 py-0.5 rounded-full font-medium bg-purple-100 text-purple-700';
+                }
+                if (routeDesc) routeDesc.textContent = 'Custom domain, load balancer or reverse proxy';
+            } else if (selectedRouteMode === 'localhost') {
+                selectedRouteHost = '127.0.0.1';
+                if (routeBadge) {
+                    routeBadge.textContent = 'Local Machine (127.0.0.1)';
+                    routeBadge.className = 'text-[10px] px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-700';
+                }
+                if (routeDesc) routeDesc.textContent = 'Local sidecars and loopback dev';
+            }
+
+            if (routeHostInp) routeHostInp.value = selectedRouteHost;
+            renderConnectDetails();
+        });
+    });
+
+    if (routeHostInp) {
+        routeHostInp.addEventListener('input', (e) => {
+            selectedRouteHost = e.target.value.trim() || 'localhost';
+            renderConnectDetails();
+        });
+    }
+
+    // IP Routing Firewall Presets & Save
+    const presetAllowAll = document.getElementById('presetAllowAllBtn');
+    if (presetAllowAll) {
+        presetAllowAll.addEventListener('click', () => {
+            const inp = document.getElementById('dbAllowedIpsInput');
+            if (inp) inp.value = '0.0.0.0/0';
+        });
+    }
+
+    const presetVpcOnly = document.getElementById('presetVpcOnlyBtn');
+    if (presetVpcOnly) {
+        presetVpcOnly.addEventListener('click', () => {
+            const inp = document.getElementById('dbAllowedIpsInput');
+            const vpcSubnet = networkInfo.vpcPrivateIp ? networkInfo.vpcPrivateIp.replace(/\.\d+$/, '.0/24') : '10.0.0.0/16';
+            if (inp) inp.value = vpcSubnet;
+        });
+    }
+
+    const presetMyIp = document.getElementById('presetMyIpBtn');
+    if (presetMyIp) {
+        presetMyIp.addEventListener('click', () => {
+            const inp = document.getElementById('dbAllowedIpsInput');
+            if (inp) inp.value = networkInfo.clientIp || '127.0.0.1';
+        });
+    }
+
+    const saveIpRulesBtn = document.getElementById('saveDbIpRulesBtn');
+    if (saveIpRulesBtn) {
+        saveIpRulesBtn.addEventListener('click', async () => {
+            const inp = document.getElementById('dbAllowedIpsInput');
+            if (!inp) return;
+            const ips = inp.value.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+            const dbId = activeConnectTenantUsername;
+
+            saveIpRulesBtn.disabled = true;
+            saveIpRulesBtn.innerHTML = '<iconify-icon icon="lucide:loader-2" class="animate-spin" width="13"></iconify-icon> Saving...';
+
+            try {
+                const res = await fetch('/api/databases/ip-routing', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ databaseId: dbId, allowedIps: ips.length > 0 ? ips : ['0.0.0.0/0'] })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast('IP Routing Firewall updated successfully!', 'success');
+                    updateDatabaseIpRoutingView(data.database);
+                    if (typeof fetchDatabases === 'function') fetchDatabases();
+                } else {
+                    showToast(data.error || 'Failed to update IP routing rules', 'error');
+                }
+            } catch (err) {
+                showToast('Failed to save IP rules: ' + err.message, 'error');
+            } finally {
+                saveIpRulesBtn.disabled = false;
+                saveIpRulesBtn.textContent = 'Save Rules';
+            }
+        });
+    }
+
     const copyRedisUrlBtn = document.getElementById('copyConnRedisUrlBtn');
     if (copyRedisUrlBtn) {
         copyRedisUrlBtn.addEventListener('click', () => {
@@ -1947,6 +2086,64 @@ function initConnectModal() {
             const code = document.getElementById('connectSnippetCode');
             if (code) copyToClipboard(code.innerText, 'Code snippet copied!');
         });
+    }
+}
+
+async function initNetworkRouting() {
+    try {
+        const res = await fetch('/api/network/info');
+        if (res.ok) {
+            const data = await res.json();
+            networkInfo = data;
+            if (data.publicHost) {
+                selectedRouteHost = data.publicHost;
+            } else if (data.vpcPrivateIp) {
+                selectedRouteHost = data.vpcPrivateIp;
+            } else {
+                selectedRouteHost = window.location.hostname || 'localhost';
+            }
+
+            const topbarRoute = document.getElementById('topbarRouteHost');
+            if (topbarRoute) {
+                topbarRoute.textContent = `${selectedRouteHost} : ${data.redisPort || 6379}`;
+            }
+
+            const clientSpan = document.getElementById('detectedClientIpSpan');
+            if (clientSpan) {
+                clientSpan.textContent = data.clientIp || '127.0.0.1';
+            }
+
+            const routeHostInp = document.getElementById('routeHostInput');
+            if (routeHostInp) {
+                routeHostInp.value = selectedRouteHost;
+            }
+        }
+    } catch (e) {
+        console.warn('Network routing info discovery error:', e);
+    }
+}
+
+function updateDatabaseIpRoutingView(db) {
+    const ipInp = document.getElementById('dbAllowedIpsInput');
+    const badge = document.getElementById('dbIpAccessBadge');
+    if (!ipInp || !badge) return;
+
+    if (!db) {
+        ipInp.value = '0.0.0.0/0';
+        badge.textContent = '0.0.0.0/0 (Open Public Access)';
+        badge.className = 'text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-600 border border-emerald-200';
+        return;
+    }
+
+    const rules = db.allowedIps || ['0.0.0.0/0'];
+    ipInp.value = rules.join(', ');
+    const isPublic = rules.includes('0.0.0.0/0') || rules.includes('*') || db.isPublicAccess;
+    if (isPublic) {
+        badge.textContent = '0.0.0.0/0 (Open Public Access)';
+        badge.className = 'text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-600 border border-emerald-200';
+    } else {
+        badge.textContent = `${rules.length} Restricted CIDR Rules`;
+        badge.className = 'text-[10px] px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700 border border-amber-200';
     }
 }
 
@@ -1996,9 +2193,9 @@ function populateConnectAccountSelector() {
 }
 
 function renderConnectDetails() {
-    const host = window.location.hostname || 'localhost';
-    const redisPort = 6379;
-    const webPort = window.location.port || '8080';
+    const host = selectedRouteHost || networkInfo.publicHost || window.location.hostname || 'localhost';
+    const redisPort = networkInfo.redisPort || 6379;
+    const webPort = networkInfo.webPort || window.location.port || '8080';
     const username = activeConnectTenantUsername;
 
     let password = 'tok_admin_live_secret';
@@ -2024,6 +2221,14 @@ function renderConnectDetails() {
     const tokenUrlInp = document.getElementById('connTokenUrlInput');
     if (redisUrlInp) redisUrlInp.value = stdUrl;
     if (tokenUrlInp) tokenUrlInp.value = tokenUrl;
+
+    const routeHostInp = document.getElementById('routeHostInput');
+    if (routeHostInp && !routeHostInp.matches(':focus')) {
+        routeHostInp.value = host;
+    }
+
+    const foundDb = [...userDatabases.myDatabases, ...userDatabases.sharedWithMe].find(d => d.id === username);
+    updateDatabaseIpRoutingView(foundDb);
 
     renderConnectSnippet(username, stdUrl, tokenUrl, host, redisPort, webPort);
 }

@@ -95,6 +95,10 @@ public class VirtualDatabaseManager {
         }
     }
 
+    public synchronized void saveMetadata() {
+        saveToDisk();
+    }
+
     public synchronized DatabaseInstance createDatabase(String ownerEmail, String name) {
         String id = "db_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         return createDatabase(ownerEmail, name, id, null);

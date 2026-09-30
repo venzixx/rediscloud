@@ -62,7 +62,7 @@
                         <iconify-icon icon="logos:redis" width="20" height="20"></iconify-icon>
                     </div>
                     <span class="font-bold text-white text-lg tracking-tight">Redis<span class="text-purple-400">Cloud</span></span>
-                    <span class="hidden sm:inline-block px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider bg-purple-500/15 text-purple-300 border border-purple-500/30 rounded-full">v1.0 Loom</span>
+                    <span class="hidden sm:inline-block px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider bg-purple-500/15 text-purple-300 border border-purple-500/30 rounded-full">v1.0.1 Loom</span>
                 </div>
 
                 <nav class="hidden md:flex items-center gap-6 text-sm text-slate-300 font-medium">
@@ -461,6 +461,12 @@ console.log("Cached User:", JSON.parse(user));</code></pre>
                     <iconify-icon icon="lucide:link-2" width="15" class="text-purple-600"></iconify-icon>
                     <span class="hidden sm:inline">Connect</span>
                 </button>
+
+                <!-- IP Routing Indicator -->
+                <div id="topbarRoutingIndicator" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-50/80 border border-purple-200/80 rounded-md text-xs text-purple-700 font-medium cursor-pointer hover:bg-purple-100/80 transition-colors" onclick="document.getElementById('openConnectModalBtn').click()" title="Configured IP Routing & Network Reachability">
+                    <iconify-icon icon="lucide:network" width="14" class="text-purple-600"></iconify-icon>
+                    <span id="topbarRouteHost">Public / VPC: Active</span>
+                </div>
 
                 <!-- Live Sync Toggle -->
                 <div class="flex items-center gap-2 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-600">
@@ -1923,6 +1929,42 @@ console.log("Cached User:", JSON.parse(user));</code></pre>
                     </select>
                 </div>
 
+                <!-- IP Routing / Reachability Selector -->
+                <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                            <iconify-icon icon="lucide:network" class="text-purple-600" width="14"></iconify-icon>
+                            <span>IP Routing &amp; Reachability:</span>
+                        </label>
+                        <span id="routeStatusBadge" class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">Public Outer Access</span>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-gray-200/70 rounded-lg text-xs font-medium">
+                        <button type="button" class="route-mode-btn py-1.5 px-2 rounded-md bg-white shadow-xs text-purple-700 font-semibold transition-all flex items-center justify-center gap-1" data-mode="public">
+                            <iconify-icon icon="lucide:globe" width="13"></iconify-icon>
+                            <span>Public IP</span>
+                        </button>
+                        <button type="button" class="route-mode-btn py-1.5 px-2 rounded-md text-gray-600 hover:text-gray-900 transition-all flex items-center justify-center gap-1" data-mode="vpc">
+                            <iconify-icon icon="lucide:server" width="13"></iconify-icon>
+                            <span>VPC / Private</span>
+                        </button>
+                        <button type="button" class="route-mode-btn py-1.5 px-2 rounded-md text-gray-600 hover:text-gray-900 transition-all flex items-center justify-center gap-1" data-mode="custom">
+                            <iconify-icon icon="lucide:sliders" width="13"></iconify-icon>
+                            <span>Custom Host</span>
+                        </button>
+                        <button type="button" class="route-mode-btn py-1.5 px-2 rounded-md text-gray-600 hover:text-gray-900 transition-all flex items-center justify-center gap-1" data-mode="localhost">
+                            <iconify-icon icon="lucide:laptop" width="13"></iconify-icon>
+                            <span>Localhost</span>
+                        </button>
+                    </div>
+
+                    <div class="mt-2.5 flex items-center gap-2">
+                        <div class="text-[11px] text-gray-500 font-medium whitespace-nowrap">Target Host:</div>
+                        <input type="text" id="routeHostInput" class="flex-1 bg-white border border-gray-200 rounded-lg px-2.5 py-1 text-xs font-mono text-gray-800 focus:outline-none focus:border-purple-500" placeholder="e.g. 54.210.12.34 or redis.example.com">
+                        <span id="routeDescText" class="text-[11px] text-gray-400 hidden sm:inline">Outer apps (Vercel, Node, Python)</span>
+                    </div>
+                </div>
+
                 <!-- URL Cards -->
                 <div class="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
                     <div>
@@ -1986,6 +2028,31 @@ console.log("Cached User:", JSON.parse(user));</code></pre>
                             </button>
                         </div>
                         <pre class="overflow-x-auto"><code id="connectSnippetCode">// Loading snippet...</code></pre>
+                    </div>
+                </div>
+
+                <!-- IP Routing Firewall / CIDR Allowlist Card -->
+                <div class="bg-gray-50 p-3.5 rounded-xl border border-gray-200">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-1.5">
+                            <iconify-icon icon="lucide:shield-check" class="text-emerald-600" width="15"></iconify-icon>
+                            <span class="text-xs font-semibold text-gray-800">Database IP Firewall (CIDR Allowlist):</span>
+                        </div>
+                        <span id="dbIpAccessBadge" class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-600 border border-emerald-200">0.0.0.0/0 (Open Public Access)</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <input type="text" id="dbAllowedIpsInput" placeholder="0.0.0.0/0, 10.0.0.0/16, 192.168.1.5" class="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-mono text-gray-800 focus:outline-none focus:border-purple-500">
+                        <button type="button" id="saveDbIpRulesBtn" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded-lg transition-colors shadow-xs">
+                            Save Rules
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-2 mt-2 text-[11px] text-gray-500 flex-wrap">
+                        <span class="font-medium">Quick Presets:</span>
+                        <button type="button" class="text-purple-600 hover:underline font-mono" id="presetAllowAllBtn">0.0.0.0/0 (Allow All)</button>
+                        <span>•</span>
+                        <button type="button" class="text-purple-600 hover:underline font-mono" id="presetVpcOnlyBtn">10.0.0.0/16 (VPC Only)</button>
+                        <span>•</span>
+                        <button type="button" class="text-purple-600 hover:underline font-mono" id="presetMyIpBtn">My IP (<span id="detectedClientIpSpan">detecting...</span>)</button>
                     </div>
                 </div>
             </div>

@@ -35,11 +35,12 @@ public class ApiHandler implements HttpHandler {
     private final AccountManager accountManager;
     private final int redisPort;
     private final int webPort;
+    private final com.myredis.config.ServerConfig config;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public ApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine,
                       VirtualDatabaseManager virtualDbManager, AccountManager accountManager,
-                      int redisPort, int webPort) {
+                      int redisPort, int webPort, com.myredis.config.ServerConfig config) {
         this.storage = storage;
         this.registry = registry;
         this.aclEngine = aclEngine;
@@ -47,15 +48,22 @@ public class ApiHandler implements HttpHandler {
         this.accountManager = accountManager;
         this.redisPort = redisPort > 0 ? redisPort : 6379;
         this.webPort = webPort > 0 ? webPort : 8080;
+        this.config = config;
+    }
+
+    public ApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine,
+                      VirtualDatabaseManager virtualDbManager, AccountManager accountManager,
+                      int redisPort, int webPort) {
+        this(storage, registry, aclEngine, virtualDbManager, accountManager, redisPort, webPort, null);
     }
 
     public ApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine,
                       VirtualDatabaseManager virtualDbManager, int redisPort, int webPort) {
-        this(storage, registry, aclEngine, virtualDbManager, null, redisPort, webPort);
+        this(storage, registry, aclEngine, virtualDbManager, null, redisPort, webPort, null);
     }
 
     public ApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine) {
-        this(storage, registry, aclEngine, null, null, 6379, 8080);
+        this(storage, registry, aclEngine, null, null, 6379, 8080, null);
     }
 
     @Override
@@ -102,6 +110,10 @@ public class ApiHandler implements HttpHandler {
                 handleShareLink(exchange);
             } else if (path.equals("/api/databases/join") && "POST".equals(method)) {
                 handleJoinShareLink(exchange);
+            } else if (path.equals("/api/databases/ip-routing") && "POST".equals(method)) {
+                handleDatabaseIpRouting(exchange);
+            } else if ((path.equals("/api/network/info") || path.equals("/api/network/routing")) && "GET".equals(method)) {
+                handleNetworkInfo(exchange);
             } else if (path.startsWith("/api/databases/") && "DELETE".equals(method)) {
                 handleDeleteDatabase(exchange, path.substring("/api/databases/".length()));
             } else if (path.equals("/api/database") && "DELETE".equals(method)) {
@@ -890,11 +902,134 @@ public class ApiHandler implements HttpHandler {
         };
     }
 
+    private void handleNetworkInfo(HttpExchange exchange) throws IOException {
+        String reqHost = exchange.getRequestHeaders().getFirst("Host");
+        if (reqHost != null && reqHost.contains(":")) {
+            reqHost = reqHost.substring(0, reqHost.indexOf(':'));
+        }
+        String fwdHost = exchange.getRequestHeaders().getFirst("X-Forwarded-Host");
+        if (fwdHost != null && fwdHost.contains(":")) {
+            fwdHost = fwdHost.substring(0, fwdHost.indexOf(':'));
+        }
+
+        String clientIp = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (clientIp == null || clientIp.isBlank()) {
+            clientIp = exchange.getRequestHeaders().getFirst("X-Real-IP");
+        }
+        if (clientIp == null || clientIp.isBlank()) {
+            clientIp = (exchange.getRemoteAddress() != null && exchange.getRemoteAddress().getAddress() != null)
+                    ? exchange.getRemoteAddress().getAddress().getHostAddress()
+                    : "127.0.0.1";
+        } else if (clientIp.contains(",")) {
+            clientIp = clientIp.split(",")[0].trim();
+        }
+        if (clientIp.startsWith("/")) clientIp = clientIp.substring(1);
+        if (clientIp.startsWith("::ffff:")) clientIp = clientIp.substring(7);
+
+        String publicHost = (config != null) ? config.getPublicHost() : null;
+        String vpcIp = (config != null) ? config.getVpcPrivateIp() : com.myredis.config.ServerConfig.detectVpcPrivateIp();
+
+        String effectivePublic = publicHost;
+        if (effectivePublic == null || effectivePublic.isBlank()) {
+            if (fwdHost != null && !fwdHost.isBlank()) {
+                effectivePublic = fwdHost;
+            } else if (reqHost != null && !reqHost.isBlank() && !reqHost.equalsIgnoreCase("localhost") && !reqHost.equals("127.0.0.1")) {
+                effectivePublic = reqHost;
+            } else {
+                effectivePublic = vpcIp;
+            }
+        }
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("publicHost", effectivePublic);
+        resp.put("vpcPrivateIp", vpcIp);
+        resp.put("clientIp", clientIp);
+        resp.put("requestHost", reqHost != null ? reqHost : "localhost");
+        resp.put("redisPort", redisPort);
+        resp.put("webPort", webPort);
+
+        List<Map<String, String>> routes = List.of(
+                Map.of("id", "public", "label", "Public IP / Domain", "host", effectivePublic, "desc", "Outer apps, Vercel, Lambda, external cloud"),
+                Map.of("id", "vpc", "label", "VPC / Private Network", "host", vpcIp, "desc", "AWS/GCP VPC, Docker network, low-latency private interconnect"),
+                Map.of("id", "custom", "label", "Custom Host / Domain", "host", "", "desc", "Custom domain, CNAME, Load Balancer or reverse proxy"),
+                Map.of("id", "localhost", "label", "Localhost (127.0.0.1)", "host", "127.0.0.1", "desc", "Local machine, sidecar or dev testing")
+        );
+        resp.put("routingOptions", routes);
+
+        sendJson(exchange, 200, resp);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleDatabaseIpRouting(HttpExchange exchange) throws IOException {
+        Account user = resolveRequestingUser(exchange);
+        if (user == null) {
+            sendJson(exchange, 401, Map.of("error", "Sign in required to configure IP routing"));
+            return;
+        }
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        String dbId = (String) req.get("databaseId");
+        if (dbId == null || dbId.isBlank()) {
+            sendJson(exchange, 400, Map.of("error", "databaseId is required"));
+            return;
+        }
+
+        DatabaseInstance db = (virtualDbManager != null) ? virtualDbManager.getDatabase(dbId) : null;
+        if (db == null) {
+            sendJson(exchange, 404, Map.of("error", "Database not found: " + dbId));
+            return;
+        }
+
+        if (!user.isAdmin() && !db.canWrite(user.getEmail())) {
+            sendJson(exchange, 403, Map.of("error", "You do not have permission to modify IP routing for this database"));
+            return;
+        }
+
+        Object ipsObj = req.get("allowedIps");
+        List<String> ips = new ArrayList<>();
+        if (ipsObj instanceof List<?> list) {
+            for (Object o : list) {
+                if (o != null && !String.valueOf(o).isBlank()) {
+                    ips.add(String.valueOf(o).trim());
+                }
+            }
+        } else if (ipsObj instanceof String s) {
+            for (String part : s.split("[,;\\s]+")) {
+                if (!part.isBlank()) ips.add(part.trim());
+            }
+        }
+
+        db.setAllowedIps(ips);
+        if (virtualDbManager != null) {
+            virtualDbManager.saveMetadata();
+        }
+
+        String host = resolveHost(exchange);
+        sendJson(exchange, 200, Map.of(
+                "success", true,
+                "message", "Database IP routing rules updated successfully",
+                "database", db.toMap(host, redisPort, webPort, user.getEmail()),
+                "allowedIps", db.getAllowedIps(),
+                "publicAccess", db.isPublicAccess()
+        ));
+    }
+
     private String resolveHost(HttpExchange exchange) {
+        if (config != null && config.getPublicHost() != null && !config.getPublicHost().isBlank()) {
+            return config.getPublicHost();
+        }
+        String fwd = exchange.getRequestHeaders().getFirst("X-Forwarded-Host");
+        if (fwd != null && !fwd.isBlank()) {
+            int colon = fwd.indexOf(':');
+            return colon > 0 ? fwd.substring(0, colon) : fwd;
+        }
         String host = exchange.getRequestHeaders().getFirst("Host");
         if (host != null && !host.isBlank()) {
             int colon = host.indexOf(':');
             return colon > 0 ? host.substring(0, colon) : host;
+        }
+        if (config != null && config.getVpcPrivateIp() != null) {
+            return config.getVpcPrivateIp();
         }
         return "localhost";
     }

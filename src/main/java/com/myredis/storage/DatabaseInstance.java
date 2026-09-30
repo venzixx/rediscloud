@@ -22,6 +22,9 @@ public class DatabaseInstance {
     // Collaborators: email (lowercase) -> Role ("OWNER", "EDITOR", "VIEWER")
     private final Map<String, String> collaborators = new ConcurrentHashMap<>();
 
+    // IP Routing & CIDR Firewall Allowlist (e.g. 0.0.0.0/0 for public, 10.0.0.0/16 for VPC)
+    private final Set<String> allowedIps = ConcurrentHashMap.newKeySet();
+
     private String shareLinkToken;
     private boolean shareLinkEnabled = false;
     private String shareLinkRole = "VIEWER";
@@ -39,6 +42,7 @@ public class DatabaseInstance {
         this.storage = storage != null ? storage : new StorageEngine(new ServerMetrics());
         this.createdAtMillis = createdAtMillis > 0 ? createdAtMillis : System.currentTimeMillis();
         this.shareLinkToken = "lnk_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        this.allowedIps.add("0.0.0.0/0"); // Default: open public access for outer apps (Vercel, external cloud)
 
         // Owner has full OWNER rights
         if (!this.ownerEmail.isBlank()) {
@@ -147,6 +151,101 @@ public class DatabaseInstance {
         return "OWNER".equals(role);
     }
 
+    public Set<String> getAllowedIps() {
+        return Collections.unmodifiableSet(allowedIps);
+    }
+
+    public void setAllowedIps(Collection<String> ips) {
+        allowedIps.clear();
+        if (ips == null || ips.isEmpty()) {
+            allowedIps.add("0.0.0.0/0");
+        } else {
+            for (String ip : ips) {
+                if (ip != null && !ip.isBlank()) {
+                    allowedIps.add(ip.trim());
+                }
+            }
+            if (allowedIps.isEmpty()) {
+                allowedIps.add("0.0.0.0/0");
+            }
+        }
+    }
+
+    public void addAllowedIp(String ipOrCidr) {
+        if (ipOrCidr != null && !ipOrCidr.isBlank()) {
+            allowedIps.add(ipOrCidr.trim());
+        }
+    }
+
+    public void removeAllowedIp(String ipOrCidr) {
+        if (ipOrCidr != null) {
+            allowedIps.remove(ipOrCidr.trim());
+            if (allowedIps.isEmpty()) {
+                allowedIps.add("0.0.0.0/0");
+            }
+        }
+    }
+
+    public boolean isPublicAccess() {
+        return allowedIps.contains("0.0.0.0/0") || allowedIps.contains("*") || allowedIps.contains("all");
+    }
+
+    public boolean isIpAllowed(String clientIp) {
+        if (clientIp == null || clientIp.isBlank()) return true;
+        String cleanIp = clientIp.trim();
+        if (cleanIp.startsWith("/")) cleanIp = cleanIp.substring(1);
+        if (cleanIp.startsWith("::ffff:")) {
+            cleanIp = cleanIp.substring(7);
+        }
+        if ("127.0.0.1".equals(cleanIp) || "0:0:0:0:0:0:0:1".equals(cleanIp) || "::1".equals(cleanIp) || "localhost".equalsIgnoreCase(cleanIp)) {
+            return true;
+        }
+        if (isPublicAccess()) {
+            return true;
+        }
+        for (String rule : allowedIps) {
+            if ("0.0.0.0/0".equals(rule) || "*".equals(rule) || "all".equalsIgnoreCase(rule)) {
+                return true;
+            }
+            if (rule.equalsIgnoreCase(cleanIp)) {
+                return true;
+            }
+            if (rule.contains("/")) {
+                if (matchesCidr(cleanIp, rule)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean matchesCidr(String ip, String cidr) {
+        try {
+            String[] parts = cidr.split("/");
+            if (parts.length != 2) return false;
+            long ipNum = ipv4ToLong(ip);
+            long netNum = ipv4ToLong(parts[0]);
+            int prefix = Integer.parseInt(parts[1]);
+            if (prefix < 0 || prefix > 32) return false;
+            long mask = prefix == 0 ? 0L : (-1L << (32 - prefix)) & 0xFFFFFFFFL;
+            return (ipNum & mask) == (netNum & mask);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static long ipv4ToLong(String ip) {
+        String[] octets = ip.split("\\.");
+        if (octets.length != 4) throw new IllegalArgumentException("Invalid IPv4: " + ip);
+        long res = 0;
+        for (int i = 0; i < 4; i++) {
+            long oct = Long.parseLong(octets[i]);
+            if (oct < 0 || oct > 255) throw new IllegalArgumentException("Invalid IPv4 octet: " + oct);
+            res |= (oct << ((3 - i) * 8));
+        }
+        return res & 0xFFFFFFFFL;
+    }
+
     public Map<String, Object> toMetadataMap() {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("id", id);
@@ -159,6 +258,7 @@ public class DatabaseInstance {
         map.put("shareLinkEnabled", shareLinkEnabled);
         map.put("shareLinkRole", shareLinkRole);
         map.put("collaborators", new HashMap<>(collaborators));
+        map.put("allowedIps", new ArrayList<>(allowedIps));
         return map;
     }
 
@@ -185,6 +285,9 @@ public class DatabaseInstance {
         if (map.get("collaborators") instanceof Map<?, ?> collabs) {
             collabs.forEach((k, v) -> db.addCollaborator(String.valueOf(k), String.valueOf(v)));
         }
+        if (map.get("allowedIps") instanceof List<?> ips) {
+            db.setAllowedIps(ips.stream().map(String::valueOf).toList());
+        }
         return db;
     }
 
@@ -208,6 +311,10 @@ public class DatabaseInstance {
         map.put("createdAt", createdAtMillis);
         map.put("apiToken", apiToken);
         map.put("password", password);
+
+        // IP Routing & CIDR Firewall Allowlist
+        map.put("allowedIps", new ArrayList<>(allowedIps));
+        map.put("isPublicAccess", isPublicAccess());
 
         // Sharing info
         map.put("collaboratorsCount", collaborators.size());

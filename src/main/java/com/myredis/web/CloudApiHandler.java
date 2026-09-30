@@ -30,20 +30,28 @@ public class CloudApiHandler implements HttpHandler {
     private final VirtualDatabaseManager virtualDbManager;
     private final int redisPort;
     private final int webPort;
+    private final com.myredis.config.ServerConfig config;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public CloudApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine,
-                           VirtualDatabaseManager virtualDbManager, int redisPort, int webPort) {
+                           VirtualDatabaseManager virtualDbManager, int redisPort, int webPort,
+                           com.myredis.config.ServerConfig config) {
         this.storage = storage;
         this.registry = registry;
         this.aclEngine = aclEngine;
         this.virtualDbManager = virtualDbManager;
         this.redisPort = redisPort > 0 ? redisPort : 6379;
         this.webPort = webPort > 0 ? webPort : 8080;
+        this.config = config;
+    }
+
+    public CloudApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine,
+                           VirtualDatabaseManager virtualDbManager, int redisPort, int webPort) {
+        this(storage, registry, aclEngine, virtualDbManager, redisPort, webPort, null);
     }
 
     public CloudApiHandler(StorageEngine storage, CommandRegistry registry, AclEngine aclEngine) {
-        this(storage, registry, aclEngine, null, 6379, 8080);
+        this(storage, registry, aclEngine, null, 6379, 8080, null);
     }
 
     @Override
@@ -459,10 +467,21 @@ public class CloudApiHandler implements HttpHandler {
     }
 
     private String resolveHost(HttpExchange exchange) {
+        if (config != null && config.getPublicHost() != null && !config.getPublicHost().isBlank()) {
+            return config.getPublicHost();
+        }
+        String fwd = exchange.getRequestHeaders().getFirst("X-Forwarded-Host");
+        if (fwd != null && !fwd.isBlank()) {
+            int colon = fwd.indexOf(':');
+            return colon > 0 ? fwd.substring(0, colon) : fwd;
+        }
         String host = exchange.getRequestHeaders().getFirst("Host");
         if (host != null && !host.isBlank()) {
             int colon = host.indexOf(':');
             return colon > 0 ? host.substring(0, colon) : host;
+        }
+        if (config != null && config.getVpcPrivateIp() != null) {
+            return config.getVpcPrivateIp();
         }
         return "localhost";
     }
