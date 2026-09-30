@@ -1,192 +1,300 @@
-// Redis in Java - Web Console Client
-let currentKeys = [];
-let pollInterval = null;
-let commandHistory = [];
-let historyIndex = -1;
+// Redis Studio - Database Console Client Engine
+let allKeys = [];
+let filteredKeys = [];
+let selectedKeys = new Set();
+let activeTypeFilter = 'ALL';
+let activeNamespace = null;
+let currentSort = 'key_asc';
+let pollTimer = null;
 let activeInspectKey = null;
+let inspectCache = null;
 
 document.addEventListener('DOMContentLoaded', () => {
-    initTabs();
-    initStatsPolling();
-    initExplorer();
-    initTerminal();
-    initModals();
-    loadKeys();
-    loadStats();
+    initNavigation();
+    initDatasheetToolbar();
+    initInspector();
+    initTerminalDrawer();
+    initInsertModal();
+    initExportImport();
+    initLiveSync();
+
+    fetchKeys();
+    fetchStats();
 });
 
 // ==========================================
-// Tabs Management
+// Navigation & Views
 // ==========================================
-function initTabs() {
-    const tabs = document.querySelectorAll('.nav-tab');
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
+function initNavigation() {
+    const navItems = document.querySelectorAll('.nav-item[data-type-filter]');
+    navItems.forEach(item => {
+        item.addEventListener('click', () => {
+            navItems.forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
 
-            const target = tab.dataset.tab;
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-            document.getElementById('pane-' + target).classList.add('active');
+            activeTypeFilter = item.dataset.typeFilter;
+            activeNamespace = null; // Clear namespace filter when switching types
 
-            if (target === 'telemetry') {
-                loadServerInfo();
-            } else if (target === 'terminal') {
-                document.getElementById('terminalInput').focus();
-            }
+            // Clear active namespace highlights
+            document.querySelectorAll('.tree-folder').forEach(f => f.classList.remove('active'));
+
+            updateBreadcrumb();
+            applyFilterAndRender();
         });
     });
-}
 
-// ==========================================
-// Stats & Telemetry Polling
-// ==========================================
-function initStatsPolling() {
-    const toggle = document.getElementById('autoRefreshToggle');
-    const refreshBtn = document.getElementById('refreshBtn');
-
-    function updatePolling() {
-        if (toggle.checked) {
-            if (!pollInterval) {
-                pollInterval = setInterval(() => {
-                    loadStats();
-                    if (document.getElementById('pane-explorer').classList.contains('active')) {
-                        loadKeys(true);
-                    }
-                }, 2500);
-            }
-        } else {
-            if (pollInterval) {
-                clearInterval(pollInterval);
-                pollInterval = null;
-            }
-        }
-    }
-
-    toggle.addEventListener('change', updatePolling);
-    refreshBtn.addEventListener('click', () => {
-        loadStats();
-        loadKeys();
-        showToast('Refreshed data from Redis');
+    document.getElementById('refreshNamespacesBtn').addEventListener('click', () => {
+        buildNamespaceTree(allKeys);
+        showToast('Refreshed namespaces');
     });
 
-    updatePolling();
-}
-
-async function loadStats() {
-    try {
-        const res = await fetch('/api/stats');
-        if (!res.ok) throw new Error('Failed to fetch stats');
-        const stats = await res.json();
-
-        document.getElementById('statTotalKeys').textContent = stats.total_keys ?? 0;
-        document.getElementById('statMemory').textContent = stats.used_memory_human ?? '0 B';
-        document.getElementById('statMemorySub').textContent = `of ${formatBytes(stats.max_memory_bytes)} max`;
-        document.getElementById('statCommands').textContent = Number(stats.total_commands_processed).toLocaleString();
-        document.getElementById('statClients').textContent = stats.connected_clients ?? 0;
-
-        // Hit rate
-        const hits = stats.keyspace_hits || 0;
-        const misses = stats.keyspace_misses || 0;
-        const totalOps = hits + misses;
-        const hitRate = totalOps > 0 ? ((hits / totalOps) * 100).toFixed(1) + '%' : '100%';
-        document.getElementById('statHitRate').textContent = hitRate;
-        document.getElementById('statHitsSub').textContent = `${hits} hits / ${misses} miss`;
-
-        // Uptime
-        document.getElementById('statUptime').textContent = formatUptime(stats.uptime_in_seconds);
-
-    } catch (e) {
-        document.getElementById('serverStatus').textContent = 'Disconnected';
-        document.querySelector('.status-dot').style.backgroundColor = '#ff4757';
-    }
-}
-
-async function loadServerInfo() {
-    try {
-        const res = await fetch('/api/exec', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: 'INFO' })
-        });
-        const data = await res.json();
-        document.getElementById('rawInfoOutput').textContent = data.output || 'No info returned';
-    } catch (e) {
-        document.getElementById('rawInfoOutput').textContent = 'Error loading INFO: ' + e.message;
-    }
-}
-
-document.getElementById('copyInfoBtn').addEventListener('click', () => {
-    const text = document.getElementById('rawInfoOutput').textContent;
-    navigator.clipboard.writeText(text).then(() => showToast('INFO copied to clipboard'));
-});
-
-// ==========================================
-// Data Explorer (Keys)
-// ==========================================
-function initExplorer() {
-    const searchInput = document.getElementById('keySearchInput');
-    const typeSelect = document.getElementById('typeFilterSelect');
-    const flushBtn = document.getElementById('flushDbBtn');
-
-    let debounceTimer;
-    searchInput.addEventListener('input', () => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => loadKeys(), 250);
-    });
-
-    typeSelect.addEventListener('change', () => loadKeys());
-
-    flushBtn.addEventListener('click', async () => {
-        if (!confirm('⚠️ Are you sure you want to FLUSH all keys from this Redis database? This cannot be undone.')) {
+    document.getElementById('flushDbBtn').addEventListener('click', async () => {
+        if (!confirm('⚠️ Are you sure you want to FLUSH the entire database? All records will be erased.')) {
             return;
         }
         try {
             const res = await fetch('/api/flush', { method: 'POST' });
             if (res.ok) {
-                showToast('Database flushed successfully');
-                loadKeys();
-                loadStats();
+                showToast('Database flushed');
+                selectedKeys.clear();
+                updateBatchBar();
+                fetchKeys();
+                fetchStats();
             }
         } catch (e) {
-            showToast('Error flushing database: ' + e.message, true);
+            showToast('Flush failed: ' + e.message, true);
         }
     });
 }
 
-async function loadKeys(isSilent = false) {
-    const searchInput = document.getElementById('keySearchInput');
-    const typeSelect = document.getElementById('typeFilterSelect');
-    const tbody = document.getElementById('keysTableBody');
+function updateBreadcrumb() {
+    const crumb = document.getElementById('currentViewBreadcrumb');
+    if (activeNamespace) {
+        crumb.textContent = `Namespace: ${activeNamespace}`;
+    } else if (activeTypeFilter === 'ALL') {
+        crumb.textContent = 'All Records';
+    } else {
+        crumb.textContent = activeTypeFilter.toUpperCase() + 's';
+    }
+}
 
-    const pattern = searchInput.value.trim() || '*';
-    const type = typeSelect.value;
+// ==========================================
+// Datasheet Filtering & Sorting
+// ==========================================
+function initDatasheetToolbar() {
+    const searchInput = document.getElementById('filterSearchInput');
+    const sortSelect = document.getElementById('sortSelect');
+    const selectAllCheck = document.getElementById('selectAllCheckbox');
 
+    let debounce;
+    searchInput.addEventListener('input', () => {
+        clearTimeout(debounce);
+        debounce = setTimeout(() => applyFilterAndRender(), 200);
+    });
+
+    sortSelect.addEventListener('change', (e) => {
+        currentSort = e.target.value;
+        applyFilterAndRender();
+    });
+
+    selectAllCheck.addEventListener('change', (e) => {
+        if (e.target.checked) {
+            filteredKeys.forEach(k => selectedKeys.add(k.key));
+        } else {
+            selectedKeys.clear();
+        }
+        updateBatchBar();
+        renderTableRows();
+    });
+
+    document.getElementById('batchCancelBtn').addEventListener('click', () => {
+        selectedKeys.clear();
+        selectAllCheck.checked = false;
+        updateBatchBar();
+        renderTableRows();
+    });
+
+    document.getElementById('batchDeleteBtn').addEventListener('click', async () => {
+        const count = selectedKeys.size;
+        if (count === 0) return;
+        if (!confirm(`Are you sure you want to delete ${count} selected records?`)) return;
+
+        try {
+            const res = await fetch('/api/batch-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keys: Array.from(selectedKeys) })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(`Deleted ${data.deletedCount} records`);
+                selectedKeys.clear();
+                updateBatchBar();
+                fetchKeys();
+                fetchStats();
+            }
+        } catch (e) {
+            showToast('Batch delete failed: ' + e.message, true);
+        }
+    });
+
+    document.getElementById('manualRefreshBtn').addEventListener('click', () => {
+        fetchKeys();
+        fetchStats();
+        showToast('Database refreshed');
+    });
+}
+
+function updateBatchBar() {
+    const bar = document.getElementById('batchActionBar');
+    const countText = document.getElementById('batchCountText');
+    const selectAllCheck = document.getElementById('selectAllCheckbox');
+
+    if (selectedKeys.size > 0) {
+        bar.classList.add('show');
+        countText.textContent = `${selectedKeys.size} record${selectedKeys.size > 1 ? 's' : ''} selected`;
+    } else {
+        bar.classList.remove('show');
+        selectAllCheck.checked = false;
+    }
+}
+
+// ==========================================
+// Data Fetching & Table Rendering
+// ==========================================
+async function fetchKeys(isSilent = false) {
     try {
-        const url = `/api/keys?pattern=${encodeURIComponent(pattern)}&type=${encodeURIComponent(type)}`;
-        const res = await fetch(url);
+        const res = await fetch('/api/keys');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        currentKeys = data.keys || [];
+        allKeys = data.keys || [];
 
-        renderKeysTable(currentKeys);
+        updateSidebarCounts(allKeys);
+        buildNamespaceTree(allKeys);
+        applyFilterAndRender();
     } catch (e) {
         if (!isSilent) {
-            tbody.innerHTML = `<tr><td colspan="5" class="empty-state"><p style="color: #ff6b81;">Error loading keys: ${e.message}</p></td></tr>`;
+            const tbody = document.getElementById('datasheetBody');
+            tbody.innerHTML = `<tr><td colspan="8" class="table-empty"><div class="empty-state"><span style="color:#ff6b81;">Error connecting to Redis: ${escapeHtml(e.message)}</span></div></td></tr>`;
         }
     }
 }
 
-function renderKeysTable(keys) {
-    const tbody = document.getElementById('keysTableBody');
-    if (!keys || keys.length === 0) {
+function updateSidebarCounts(keys) {
+    let strCount = 0, hshCount = 0, lstCount = 0, setCount = 0;
+    keys.forEach(k => {
+        switch (k.type) {
+            case 'string': strCount++; break;
+            case 'hash': hshCount++; break;
+            case 'list': lstCount++; break;
+            case 'set': setCount++; break;
+        }
+    });
+
+    document.getElementById('countAll').textContent = keys.length;
+    document.getElementById('countStrings').textContent = strCount;
+    document.getElementById('countHashes').textContent = hshCount;
+    document.getElementById('countLists').textContent = lstCount;
+    document.getElementById('countSets').textContent = setCount;
+}
+
+function buildNamespaceTree(keys) {
+    const host = document.getElementById('namespaceTreeList');
+    const namespaces = {};
+
+    keys.forEach(k => {
+        const idx = k.key.indexOf(':');
+        if (idx > 0) {
+            const ns = k.key.substring(0, idx + 1);
+            namespaces[ns] = (namespaces[ns] || 0) + 1;
+        }
+    });
+
+    const entries = Object.entries(namespaces);
+    if (entries.length === 0) {
+        host.innerHTML = '<div class="tree-item empty">No namespaces (: delimiter)</div>';
+        return;
+    }
+
+    entries.sort((a, b) => a[0].localeCompare(b[0]));
+    host.innerHTML = entries.map(([ns, count]) => `
+        <div class="tree-folder ${activeNamespace === ns ? 'active' : ''}" data-ns="${escapeHtml(ns)}">
+            <span class="f-icon">📁</span>
+            <span class="f-name">${escapeHtml(ns)}</span>
+            <span class="f-count">${count}</span>
+        </div>
+    `).join('');
+
+    host.querySelectorAll('.tree-folder').forEach(el => {
+        el.addEventListener('click', () => {
+            const ns = el.dataset.ns;
+            if (activeNamespace === ns) {
+                activeNamespace = null;
+                el.classList.remove('active');
+            } else {
+                host.querySelectorAll('.tree-folder').forEach(f => f.classList.remove('active'));
+                el.classList.add('active');
+                activeNamespace = ns;
+            }
+            updateBreadcrumb();
+            applyFilterAndRender();
+        });
+    });
+}
+
+function applyFilterAndRender() {
+    const searchVal = document.getElementById('filterSearchInput').value.trim().toLowerCase();
+
+    filteredKeys = allKeys.filter(k => {
+        // Type filter
+        if (activeTypeFilter !== 'ALL' && k.type.toLowerCase() !== activeTypeFilter.toLowerCase()) {
+            return false;
+        }
+
+        // Namespace filter
+        if (activeNamespace && !k.key.startsWith(activeNamespace)) {
+            return false;
+        }
+
+        // Search text / pattern
+        if (searchVal) {
+            const cleanPattern = searchVal.replace(/\*/g, '');
+            if (!k.key.toLowerCase().includes(cleanPattern)) {
+                return false;
+            }
+        }
+
+        return true;
+    });
+
+    // Sort
+    filteredKeys.sort((a, b) => {
+        switch (currentSort) {
+            case 'key_desc': return b.key.localeCompare(a.key);
+            case 'size_desc': return b.size - a.size;
+            case 'ttl_asc': return (a.ttl === -1 ? 999999999 : a.ttl) - (b.ttl === -1 ? 999999999 : b.ttl);
+            case 'created_desc': return b.createdAt - a.createdAt;
+            case 'key_asc':
+            default:
+                return a.key.localeCompare(b.key);
+        }
+    });
+
+    document.getElementById('recordCounter').textContent = `Showing ${filteredKeys.length} of ${allKeys.length} records`;
+    renderTableRows();
+}
+
+function renderTableRows() {
+    const tbody = document.getElementById('datasheetBody');
+
+    if (filteredKeys.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="5" class="empty-state">
-                    <div class="empty-content">
-                        <span style="font-size: 2rem;">🔍</span>
-                        <p>No keys found matching your criteria</p>
-                        <button class="btn btn-primary btn-sm" onclick="openNewKeyModal()">Create a Key</button>
+                <td colspan="8" class="table-empty">
+                    <div class="empty-state">
+                        <span style="font-size: 2rem;">📭</span>
+                        <p>No records matching query.</p>
+                        <button class="btn btn-primary btn-sm" onclick="openInsertModal()">+ Insert Record</button>
                     </div>
                 </td>
             </tr>
@@ -194,276 +302,340 @@ function renderKeysTable(keys) {
         return;
     }
 
-    tbody.innerHTML = keys.map(k => {
-        const typeClass = `badge-${k.type.toLowerCase()}`;
-        const ttlLabel = k.ttl === -1 ? 'None (Persist)' : (k.ttl <= 0 ? 'Expired' : `${k.ttl}s`);
-        const ttlClass = k.ttl > 0 ? 'has-expiry' : '';
+    tbody.innerHTML = filteredKeys.map((k, index) => {
+        const isChecked = selectedKeys.has(k.key);
+        const typeClass = getTypeBadgeClass(k.type);
+        const ttlLabel = k.ttl === -1 ? 'Persistent' : (k.ttl <= 0 ? 'Expired' : `${k.ttl}s remaining`);
+        const ttlClass = k.ttl > 0 ? 'expiring' : '';
+        const sizeLabel = k.type === 'string' ? `${k.size} B` : `${k.size} items`;
 
         return `
-            <tr>
-                <td>
-                    <span class="key-code" onclick="inspectKey('${escapeHtml(k.key)}')">${escapeHtml(k.key)}</span>
+            <tr class="${isChecked ? 'selected' : ''}" data-key="${escapeHtml(k.key)}">
+                <td class="col-checkbox">
+                    <input type="checkbox" class="row-checkbox" data-key="${escapeHtml(k.key)}" ${isChecked ? 'checked' : ''}>
                 </td>
-                <td>
-                    <span class="type-badge ${typeClass}">${escapeHtml(k.type)}</span>
+                <td class="col-num">${index + 1}</td>
+                <td class="col-key">
+                    <span class="key-clickable" onclick="openInspector('${escapeHtml(k.key)}')">
+                        ${escapeHtml(k.key)}
+                    </span>
                 </td>
-                <td style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.85rem;">
-                    ${k.size} ${k.type === 'string' ? 'chars' : 'items'}
+                <td class="col-type">
+                    <span class="badge-type ${typeClass}">${escapeHtml(k.type)}</span>
                 </td>
-                <td>
-                    <span class="ttl-pill ${ttlClass}">⏱️ ${ttlLabel}</span>
+                <td class="col-preview">
+                    <span class="preview-trunc" title="${escapeHtml(k.preview || '')}">${escapeHtml(k.preview || '(empty)')}</span>
                 </td>
-                <td style="text-align: right;">
-                    <button class="btn btn-secondary btn-sm" onclick="inspectKey('${escapeHtml(k.key)}')" title="View / Edit">
-                        Inspect
-                    </button>
-                    <button class="btn btn-outline-danger btn-sm" onclick="deleteKey('${escapeHtml(k.key)}')" title="Delete" style="margin-left: 0.35rem;">
-                        &times;
-                    </button>
+                <td class="col-size">${sizeLabel}</td>
+                <td class="col-ttl">
+                    <span class="ttl-text ${ttlClass}">⏱️ ${ttlLabel}</span>
+                </td>
+                <td class="col-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="openInspector('${escapeHtml(k.key)}')">Inspect</button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="quickDeleteKey('${escapeHtml(k.key)}')" title="Delete">&times;</button>
                 </td>
             </tr>
         `;
     }).join('');
+
+    // Attach row checkbox handlers
+    tbody.querySelectorAll('.row-checkbox').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+            const key = e.target.dataset.key;
+            if (e.target.checked) {
+                selectedKeys.add(key);
+            } else {
+                selectedKeys.delete(key);
+            }
+            updateBatchBar();
+            const tr = cb.closest('tr');
+            if (tr) tr.classList.toggle('selected', e.target.checked);
+        });
+    });
+}
+
+function getTypeBadgeClass(type) {
+    switch (type.toLowerCase()) {
+        case 'string': return 'str';
+        case 'hash': return 'hsh';
+        case 'list': return 'lst';
+        case 'set': return 'st';
+        default: return '';
+    }
+}
+
+async function quickDeleteKey(key) {
+    if (!confirm(`Delete key "${key}"?`)) return;
+    try {
+        const res = await fetch(`/api/key?key=${encodeURIComponent(key)}`, { method: 'DELETE' });
+        if (res.ok) {
+            showToast(`Deleted "${key}"`);
+            selectedKeys.delete(key);
+            updateBatchBar();
+            fetchKeys();
+            fetchStats();
+        }
+    } catch (e) {
+        showToast('Error deleting: ' + e.message, true);
+    }
 }
 
 // ==========================================
-// Key Inspection & Modification
+// Right Side Record Inspector & Editor
 // ==========================================
-async function inspectKey(key) {
+function initInspector() {
+    const drawer = document.getElementById('recordInspector');
+    const closeBtn = document.getElementById('closeInspectorBtn');
+    const cancelBtn = document.getElementById('inspCancelBtn');
+
+    closeBtn.addEventListener('click', closeInspector);
+    cancelBtn.addEventListener('click', closeInspector);
+
+    document.getElementById('inspDeleteRecordBtn').addEventListener('click', () => {
+        if (activeInspectKey) {
+            quickDeleteKey(activeInspectKey);
+            closeInspector();
+        }
+    });
+
+    document.getElementById('inspSetTtlBtn').addEventListener('click', async () => {
+        if (!activeInspectKey) return;
+        const val = parseInt(document.getElementById('inspTtlSeconds').value, 10);
+        if (isNaN(val) || val <= 0) {
+            showToast('Enter valid positive seconds', true);
+            return;
+        }
+        await fetch('/api/exec', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: `EXPIRE "${activeInspectKey}" ${val}` })
+        });
+        showToast(`TTL updated to ${val}s`);
+        openInspector(activeInspectKey);
+        fetchKeys();
+    });
+
+    document.getElementById('inspPersistBtn').addEventListener('click', async () => {
+        if (!activeInspectKey) return;
+        await fetch('/api/exec', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: `PERSIST "${activeInspectKey}"` })
+        });
+        showToast(`Key is now persistent`);
+        document.getElementById('inspTtlSeconds').value = '';
+        openInspector(activeInspectKey);
+        fetchKeys();
+    });
+
+    document.getElementById('inspSaveRecordBtn').addEventListener('click', async () => {
+        if (!activeInspectKey || !inspectCache) return;
+
+        let payloadValue;
+        if (inspectCache.type === 'string') {
+            payloadValue = document.getElementById('inspTextValue').value;
+        } else if (inspectCache.type === 'hash') {
+            const hashObj = {};
+            document.querySelectorAll('.hash-table-editor tbody tr').forEach(tr => {
+                const f = tr.querySelector('.hash-f-name').value.trim();
+                const v = tr.querySelector('.hash-f-val').value;
+                if (f) hashObj[f] = v;
+            });
+            payloadValue = hashObj;
+        } else if (inspectCache.type === 'list' || inspectCache.type === 'set') {
+            const arr = [];
+            document.querySelectorAll('.list-val-input').forEach(inp => {
+                if (inp.value.trim()) arr.push(inp.value.trim());
+            });
+            payloadValue = arr;
+        }
+
+        const ttlNum = parseInt(document.getElementById('inspTtlSeconds').value, 10);
+        const ttl = !isNaN(ttlNum) && ttlNum > 0 ? ttlNum : null;
+
+        try {
+            const res = await fetch('/api/key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    key: activeInspectKey,
+                    type: inspectCache.type,
+                    value: payloadValue,
+                    ttl: ttl
+                })
+            });
+            const d = await res.json();
+            if (d.success) {
+                showToast(`Record "${activeInspectKey}" saved successfully`);
+                fetchKeys();
+                fetchStats();
+            } else {
+                showToast(d.error || 'Failed to save', true);
+            }
+        } catch (e) {
+            showToast('Save error: ' + e.message, true);
+        }
+    });
+}
+
+async function openInspector(key) {
     activeInspectKey = key;
     try {
         const res = await fetch(`/api/key?key=${encodeURIComponent(key)}`);
         if (!res.ok) throw new Error('Key not found or expired');
         const details = await res.json();
+        inspectCache = details;
 
-        document.getElementById('modalKeyName').textContent = details.key;
-        const typeBadge = document.getElementById('modalKeyType');
+        document.getElementById('inspKeyTitle').textContent = details.key;
+        const typeBadge = document.getElementById('inspTypeBadge');
         typeBadge.textContent = details.type.toUpperCase();
-        typeBadge.className = `type-badge badge-${details.type.toLowerCase()}`;
+        typeBadge.className = `badge-type ${getTypeBadgeClass(details.type)}`;
 
-        const ttlText = details.ttl === -1 ? 'No Expiry (-1)' : `${details.ttl} seconds`;
-        document.getElementById('modalKeyTtl').textContent = ttlText;
-        document.getElementById('modalKeySize').textContent = `${details.size} ${details.type === 'string' ? 'bytes' : 'elements'}`;
-        document.getElementById('modalTtlInput').value = details.ttl > 0 ? details.ttl : '';
+        document.getElementById('inspMetaType').textContent = details.type.toUpperCase();
+        document.getElementById('inspMetaSize').textContent = details.type === 'string' ? `${details.size} bytes` : `${details.size} items`;
+        document.getElementById('inspMetaTtl').textContent = details.ttl === -1 ? 'Persistent (-1)' : `${details.ttl}s`;
+        document.getElementById('inspTtlSeconds').value = details.ttl > 0 ? details.ttl : '';
 
-        const container = document.getElementById('modalValueContainer');
-        container.innerHTML = '';
+        // Render type-specific editor
+        renderInspectorContent(details);
 
-        if (details.type === 'string') {
-            container.innerHTML = `<textarea id="inspectValueString" class="input-field text-area" rows="8" style="width: 100%; font-family: var(--font-mono);">${escapeHtml(details.value)}</textarea>`;
-        } else if (details.type === 'hash') {
-            let html = '<table class="keys-table" style="background: var(--bg-base); border-radius: 8px;"><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody>';
-            for (const [f, v] of Object.entries(details.value || {})) {
-                html += `<tr><td style="font-family: var(--font-mono); color: #58a6ff;">${escapeHtml(f)}</td><td><input type="text" class="input-field hash-field-val" data-field="${escapeHtml(f)}" value="${escapeHtml(v)}" style="width: 100%;"></td></tr>`;
-            }
-            html += '</tbody></table>';
-            container.innerHTML = html;
-        } else if (details.type === 'list' || details.type === 'set') {
-            const items = details.value || [];
-            let html = '<div style="display: flex; flex-direction: column; gap: 0.4rem; max-height: 250px; overflow-y: auto;">';
-            items.forEach((item, idx) => {
-                html += `<div style="display: flex; align-items: center; gap: 0.5rem; background: var(--bg-base); padding: 0.4rem 0.75rem; border-radius: 4px; font-family: var(--font-mono); font-size: 0.85rem;"><span style="color: var(--text-muted);">${idx + 1}.</span><span>${escapeHtml(item)}</span></div>`;
-            });
-            html += '</div>';
-            container.innerHTML = html;
-        }
-
-        document.getElementById('keyDetailModal').classList.add('open');
+        document.getElementById('recordInspector').classList.add('open');
     } catch (e) {
-        showToast('Error inspecting key: ' + e.message, true);
+        showToast('Error loading record: ' + e.message, true);
     }
 }
 
-function closeKeyModal() {
-    document.getElementById('keyDetailModal').classList.remove('open');
+function closeInspector() {
+    document.getElementById('recordInspector').classList.remove('open');
     activeInspectKey = null;
+    inspectCache = null;
 }
 
-document.getElementById('modalDeleteKeyBtn').addEventListener('click', () => {
-    if (activeInspectKey) {
-        deleteKey(activeInspectKey);
-        closeKeyModal();
-    }
-});
+function renderInspectorContent(details) {
+    const host = document.getElementById('inspectorContentHost');
+    const tools = document.getElementById('contentTools');
+    tools.innerHTML = '';
 
-document.getElementById('modalSaveKeyBtn').addEventListener('click', async () => {
-    if (!activeInspectKey) return;
+    if (details.type === 'string') {
+        tools.innerHTML = `<button class="chip" id="fmtJsonBtn">Format JSON</button>`;
+        host.innerHTML = `<textarea id="inspTextValue" class="editor-textarea">${escapeHtml(details.value)}</textarea>`;
 
-    const ttlVal = parseInt(document.getElementById('modalTtlInput').value, 10);
-    const ttl = !isNaN(ttlVal) && ttlVal > 0 ? ttlVal : null;
-
-    const strArea = document.getElementById('inspectValueString');
-    if (strArea) {
-        // String update
-        const newVal = strArea.value;
-        await saveKeyRequest(activeInspectKey, 'string', newVal, ttl);
-    } else {
-        // Update TTL via EXPIRE command if only TTL changed
-        if (ttl !== null) {
-            await fetch('/api/exec', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: `EXPIRE "${activeInspectKey}" ${ttl}` })
-            });
-        }
-        showToast('Key saved');
-        closeKeyModal();
-        loadKeys();
-    }
-});
-
-async function deleteKey(key) {
-    if (!confirm(`Are you sure you want to delete key "${key}"?`)) return;
-    try {
-        const res = await fetch(`/api/key?key=${encodeURIComponent(key)}`, { method: 'DELETE' });
-        if (res.ok) {
-            showToast(`Key "${key}" deleted`);
-            loadKeys();
-            loadStats();
-        }
-    } catch (e) {
-        showToast('Error deleting key: ' + e.message, true);
-    }
-}
-
-// ==========================================
-// New Key Modal
-// ==========================================
-function initModals() {
-    document.getElementById('openNewKeyModalBtn').addEventListener('click', openNewKeyModal);
-
-    const typeSelect = document.getElementById('newKeyType');
-    typeSelect.addEventListener('change', () => {
-        const type = typeSelect.value;
-        const label = document.getElementById('newValueLabel');
-        const helper = document.getElementById('newKeyHelper');
-        const textarea = document.getElementById('newKeyValue');
-
-        if (type === 'string') {
-            label.textContent = 'Value (String)';
-            helper.textContent = 'Enter text or JSON string';
-            textarea.placeholder = 'e.g. Hello Redis!';
-        } else if (type === 'hash') {
-            label.textContent = 'Field-Value Pairs (JSON)';
-            helper.textContent = 'JSON object format: {"field1": "value1", "field2": "value2"}';
-            textarea.placeholder = '{\n  "name": "Alice",\n  "role": "admin"\n}';
-        } else if (type === 'list') {
-            label.textContent = 'List Elements';
-            helper.textContent = 'Comma-separated values or JSON array';
-            textarea.placeholder = 'item1, item2, item3';
-        } else if (type === 'set') {
-            label.textContent = 'Set Elements (Unique)';
-            helper.textContent = 'Comma-separated unique items';
-            textarea.placeholder = 'apple, banana, orange';
-        }
-    });
-
-    document.getElementById('saveNewKeySubmitBtn').addEventListener('click', async () => {
-        const key = document.getElementById('newKeyName').value.trim();
-        const type = document.getElementById('newKeyType').value;
-        const rawVal = document.getElementById('newKeyValue').value.trim();
-        const ttlVal = parseInt(document.getElementById('newKeyTtl').value, 10);
-        const ttl = !isNaN(ttlVal) && ttlVal > 0 ? ttlVal : null;
-
-        if (!key) {
-            showToast('Key name is required', true);
-            return;
-        }
-
-        let parsedVal = rawVal;
-        if (type === 'hash') {
+        document.getElementById('fmtJsonBtn')?.addEventListener('click', () => {
+            const ta = document.getElementById('inspTextValue');
             try {
-                parsedVal = JSON.parse(rawVal);
+                const parsed = JSON.parse(ta.value);
+                ta.value = JSON.stringify(parsed, null, 2);
+                showToast('JSON Formatted');
             } catch (e) {
-                showToast('Invalid JSON for hash fields: ' + e.message, true);
-                return;
+                showToast('Not valid JSON', true);
             }
-        }
-
-        await saveKeyRequest(key, type, parsedVal, ttl);
-        closeNewKeyModal();
-    });
-}
-
-function openNewKeyModal() {
-    document.getElementById('newKeyName').value = '';
-    document.getElementById('newKeyValue').value = '';
-    document.getElementById('newKeyTtl').value = '';
-    document.getElementById('newKeyModal').classList.add('open');
-}
-
-function closeNewKeyModal() {
-    document.getElementById('newKeyModal').classList.remove('open');
-}
-
-async function saveKeyRequest(key, type, value, ttl) {
-    try {
-        const res = await fetch('/api/key', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key, type, value, ttl })
         });
-        const data = await res.json();
-        if (data.success) {
-            showToast(`Key "${key}" saved successfully`);
-            loadKeys();
-            loadStats();
-        } else {
-            showToast(data.error || 'Failed to save key', true);
-        }
-    } catch (e) {
-        showToast('Error saving key: ' + e.message, true);
+
+    } else if (details.type === 'hash') {
+        tools.innerHTML = `<button class="chip" id="addHashFieldBtn">+ Add Field</button>`;
+        const entries = Object.entries(details.value || {});
+        let html = '<table class="hash-table-editor"><thead><tr><th>Field</th><th>Value</th><th style="width:30px;"></th></tr></thead><tbody>';
+        entries.forEach(([f, v]) => {
+            html += `
+                <tr>
+                    <td><input type="text" class="hash-input hash-f-name" value="${escapeHtml(f)}"></td>
+                    <td><input type="text" class="hash-input hash-f-val" value="${escapeHtml(v)}"></td>
+                    <td><button class="drawer-btn" onclick="this.closest('tr').remove()">&times;</button></td>
+                </tr>
+            `;
+        });
+        html += '</tbody></table>';
+        host.innerHTML = html;
+
+        document.getElementById('addHashFieldBtn')?.addEventListener('click', () => {
+            const tbody = host.querySelector('tbody');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input type="text" class="hash-input hash-f-name" placeholder="new_field"></td>
+                <td><input type="text" class="hash-input hash-f-val" placeholder="value"></td>
+                <td><button class="drawer-btn" onclick="this.closest('tr').remove()">&times;</button></td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+    } else if (details.type === 'list' || details.type === 'set') {
+        const isList = details.type === 'list';
+        tools.innerHTML = `<button class="chip" id="addListItemBtn">+ Append ${isList ? 'Item' : 'Member'}</button>`;
+        const items = details.value || [];
+        let html = '<div class="list-editor-container" style="max-height: 280px; overflow-y: auto;">';
+        items.forEach((item, idx) => {
+            html += `
+                <div class="list-item-row">
+                    <span class="list-idx">${idx + 1}.</span>
+                    <input type="text" class="list-val-input" value="${escapeHtml(item)}">
+                    <button class="drawer-btn" onclick="this.closest('.list-item-row').remove()">&times;</button>
+                </div>
+            `;
+        });
+        html += '</div>';
+        host.innerHTML = html;
+
+        document.getElementById('addListItemBtn')?.addEventListener('click', () => {
+            const container = host.querySelector('.list-editor-container');
+            const row = document.createElement('div');
+            row.className = 'list-item-row';
+            const count = container.children.length + 1;
+            row.innerHTML = `
+                <span class="list-idx">${count}.</span>
+                <input type="text" class="list-val-input" placeholder="New ${isList ? 'element' : 'member'}">
+                <button class="drawer-btn" onclick="this.closest('.list-item-row').remove()">&times;</button>
+            `;
+            container.appendChild(row);
+        });
     }
 }
 
 // ==========================================
-// Web CLI Terminal
+// Bottom Dockable Web CLI Drawer
 // ==========================================
-function initTerminal() {
-    const form = document.getElementById('terminalForm');
-    const input = document.getElementById('terminalInput');
+function initTerminalDrawer() {
+    const drawer = document.getElementById('terminalDrawer');
+    const toggleBtn = document.getElementById('toggleTerminalBtn');
+    const closeBtn = document.getElementById('drawerCloseBtn');
+    const expandBtn = document.getElementById('drawerExpandBtn');
+    const form = document.getElementById('drawerForm');
+    const input = document.getElementById('drawerInput');
 
-    form.addEventListener('submit', (e) => {
+    toggleBtn.addEventListener('click', () => {
+        drawer.classList.toggle('collapsed');
+        if (!drawer.classList.contains('collapsed')) {
+            input.focus();
+        }
+    });
+
+    closeBtn.addEventListener('click', () => drawer.classList.add('collapsed'));
+
+    expandBtn.addEventListener('click', () => {
+        drawer.classList.toggle('expanded');
+    });
+
+    form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const cmd = input.value.trim();
         if (!cmd) return;
-        sendTerminalCommand(cmd);
+        await execCliCommand(cmd);
         input.value = '';
-    });
-
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowUp') {
-            if (commandHistory.length > 0 && historyIndex > 0) {
-                historyIndex--;
-                input.value = commandHistory[historyIndex];
-            } else if (historyIndex === 0 && commandHistory.length > 0) {
-                input.value = commandHistory[0];
-            }
-            e.preventDefault();
-        } else if (e.key === 'ArrowDown') {
-            if (historyIndex < commandHistory.length - 1) {
-                historyIndex++;
-                input.value = commandHistory[historyIndex];
-            } else {
-                historyIndex = commandHistory.length;
-                input.value = '';
-            }
-            e.preventDefault();
-        }
     });
 }
 
-async function sendTerminalCommand(cmdStr) {
-    commandHistory.push(cmdStr);
-    historyIndex = commandHistory.length;
+async function execCliShortcut(cmd) {
+    const drawer = document.getElementById('terminalDrawer');
+    drawer.classList.remove('collapsed');
+    await execCliCommand(cmd);
+}
 
-    const output = document.getElementById('terminalOutput');
+async function execCliCommand(cmdStr) {
+    const out = document.getElementById('drawerOutput');
 
-    // Echo command
     const cmdLine = document.createElement('div');
-    cmdLine.className = 'terminal-line cmd';
+    cmdLine.className = 'term-line cmd';
     cmdLine.textContent = `redis-cli> ${cmdStr}`;
-    output.appendChild(cmdLine);
+    out.appendChild(cmdLine);
 
     try {
         const res = await fetch('/api/exec', {
@@ -474,53 +646,212 @@ async function sendTerminalCommand(cmdStr) {
         const data = await res.json();
 
         const respLine = document.createElement('div');
-        respLine.className = 'terminal-line ' + (data.success ? 'response' : 'error');
+        respLine.className = 'term-line ' + (data.success ? 'resp' : 'err');
         respLine.textContent = data.output ?? data.error ?? '(nil)';
-        output.appendChild(respLine);
+        out.appendChild(respLine);
 
-        // Auto reload keys and stats
-        loadStats();
-        if (document.getElementById('pane-explorer').classList.contains('active')) {
-            loadKeys(true);
-        }
+        // Auto reload table and stats so user sees immediate results
+        fetchKeys(true);
+        fetchStats();
     } catch (e) {
         const errLine = document.createElement('div');
-        errLine.className = 'terminal-line error';
+        errLine.className = 'term-line err';
         errLine.textContent = 'Network error: ' + e.message;
-        output.appendChild(errLine);
+        out.appendChild(errLine);
     }
 
-    output.scrollTop = output.scrollHeight;
+    out.scrollTop = out.scrollHeight;
 }
 
-function clearTerminal() {
-    document.getElementById('terminalOutput').innerHTML = '<div class="terminal-line banner">Terminal output cleared.</div>';
+function clearCliTerminal() {
+    document.getElementById('drawerOutput').innerHTML = '<div class="term-line welcome">Terminal output cleared.</div>';
 }
 
 // ==========================================
-// Utilities
+// Export & Import
 // ==========================================
-function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+function initExportImport() {
+    const exportBtn = document.getElementById('exportDataBtn');
+    const importBtn = document.getElementById('importDataBtn');
+    const importFileInput = document.getElementById('importFileInput');
+
+    exportBtn.addEventListener('click', async () => {
+        try {
+            const res = await fetch('/api/export');
+            const data = await res.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `redis_dump_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Database exported to JSON');
+        } catch (e) {
+            showToast('Export failed: ' + e.message, true);
+        }
+    });
+
+    importBtn.addEventListener('click', () => importFileInput.click());
+
+    importFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const json = JSON.parse(evt.target.result);
+                const res = await fetch('/api/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(json)
+                });
+                const d = await res.json();
+                if (d.success) {
+                    showToast(`Imported ${d.importedCount} records successfully`);
+                    fetchKeys();
+                    fetchStats();
+                } else {
+                    showToast(d.error || 'Import failed', true);
+                }
+            } catch (err) {
+                showToast('Invalid JSON file: ' + err.message, true);
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+    });
 }
 
-function formatUptime(seconds) {
-    if (!seconds || seconds <= 0) return '0s';
-    const d = Math.floor(seconds / (3600 * 24));
-    const h = Math.floor((seconds % (3600 * 24)) / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
+// ==========================================
+// Insert Record Modal
+// ==========================================
+function initInsertModal() {
+    document.getElementById('openInsertModalBtn').addEventListener('click', openInsertModal);
 
-    const parts = [];
-    if (d > 0) parts.push(d + 'd');
-    if (h > 0) parts.push(h + 'h');
-    if (m > 0) parts.push(m + 'm');
-    parts.push(s + 's');
-    return parts.join(' ');
+    const typeSel = document.getElementById('insType');
+    typeSel.addEventListener('change', () => {
+        const t = typeSel.value;
+        const lbl = document.getElementById('insValueLabel');
+        const hint = document.getElementById('insValueHint');
+        const area = document.getElementById('insValue');
+
+        if (t === 'string') {
+            lbl.textContent = 'Value (String) *';
+            hint.textContent = 'Plain text or JSON payload';
+            area.placeholder = 'e.g. Hello Redis!';
+        } else if (t === 'hash') {
+            lbl.textContent = 'Fields (JSON Object) *';
+            hint.textContent = 'JSON object format: {"field": "value"}';
+            area.placeholder = '{\n  "name": "Alice",\n  "role": "admin"\n}';
+        } else if (t === 'list') {
+            lbl.textContent = 'List Items (Comma separated) *';
+            hint.textContent = 'Comma-separated string elements';
+            area.placeholder = 'task_1, task_2, task_3';
+        } else if (t === 'set') {
+            lbl.textContent = 'Set Members (Comma separated) *';
+            hint.textContent = 'Unique elements separated by commas';
+            area.placeholder = 'member_a, member_b, member_c';
+        }
+    });
+
+    document.getElementById('insSubmitBtn').addEventListener('click', async () => {
+        const key = document.getElementById('insKey').value.trim();
+        const type = document.getElementById('insType').value;
+        const rawVal = document.getElementById('insValue').value.trim();
+        const ttlNum = parseInt(document.getElementById('insTtl').value, 10);
+        const ttl = !isNaN(ttlNum) && ttlNum > 0 ? ttlNum : null;
+
+        if (!key) {
+            showToast('Key is required', true);
+            return;
+        }
+
+        let parsed = rawVal;
+        if (type === 'hash') {
+            try {
+                parsed = JSON.parse(rawVal);
+            } catch (e) {
+                showToast('Invalid JSON for hash: ' + e.message, true);
+                return;
+            }
+        }
+
+        try {
+            const res = await fetch('/api/key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key, type, value: parsed, ttl })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(`Record "${key}" inserted`);
+                closeInsertModal();
+                fetchKeys();
+                fetchStats();
+            } else {
+                showToast(data.error || 'Failed to insert', true);
+            }
+        } catch (e) {
+            showToast('Insert error: ' + e.message, true);
+        }
+    });
+}
+
+function openInsertModal() {
+    document.getElementById('insKey').value = '';
+    document.getElementById('insValue').value = '';
+    document.getElementById('insTtl').value = '';
+    document.getElementById('insertModal').classList.add('open');
+}
+
+function closeInsertModal() {
+    document.getElementById('insertModal').classList.remove('open');
+}
+
+// ==========================================
+// Telemetry & Live Polling
+// ==========================================
+function initLiveSync() {
+    const chk = document.getElementById('autoPollCheck');
+    function syncTimer() {
+        if (chk.checked) {
+            if (!pollTimer) {
+                pollTimer = setInterval(() => {
+                    fetchStats();
+                    fetchKeys(true);
+                }, 3000);
+            }
+        } else {
+            if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+        }
+    }
+    chk.addEventListener('change', syncTimer);
+    syncTimer();
+}
+
+async function fetchStats() {
+    try {
+        const res = await fetch('/api/stats');
+        if (!res.ok) return;
+        const stats = await res.json();
+
+        document.getElementById('sbMemory').textContent = stats.used_memory_human || '0 B';
+        document.getElementById('sbCommands').textContent = stats.total_commands_processed || 0;
+        document.getElementById('sbUptime').textContent = formatUptimeShort(stats.uptime_in_seconds);
+    } catch (ignored) {}
+}
+
+function formatUptimeShort(sec) {
+    if (!sec || sec <= 0) return '0s';
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
 }
 
 function escapeHtml(str) {
@@ -534,16 +865,16 @@ function escapeHtml(str) {
     })[m]);
 }
 
-function showToast(message, isError = false) {
-    const container = document.getElementById('toastContainer');
+function showToast(msg, isErr = false) {
+    const shelf = document.getElementById('toastContainer');
     const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.style.borderColor = isError ? 'var(--brand-red)' : 'var(--accent-green)';
-    toast.innerHTML = `<span>${isError ? '⚠️' : '✅'}</span> <span>${escapeHtml(message)}</span>`;
-    container.appendChild(toast);
+    toast.className = 'toast-item';
+    toast.style.borderColor = isErr ? 'var(--brand-red)' : 'var(--accent-green)';
+    toast.innerHTML = `<span>${isErr ? '⚠️' : '✅'}</span> <span>${escapeHtml(msg)}</span>`;
+    shelf.appendChild(toast);
 
     setTimeout(() => {
         toast.style.opacity = '0';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
+        setTimeout(() => toast.remove(), 250);
+    }, 2800);
 }

@@ -637,16 +637,49 @@ public class StorageEngine {
             meta.put("ttl", entry.getTtlSeconds(now));
             meta.put("createdAt", entry.getCreatedAtMillis());
 
-            int size = switch (entry.getType()) {
-                case STRING -> entry.asString().length();
-                case HASH -> entry.asHash().size();
-                case LIST -> entry.asList().size();
-                case SET -> entry.asSet().size();
-                default -> 0;
-            };
+            int size = 0;
+            String preview = "";
+            switch (entry.getType()) {
+                case STRING -> {
+                    String str = entry.asString();
+                    size = str.length();
+                    preview = str.length() > 60 ? str.substring(0, 57) + "..." : str;
+                }
+                case HASH -> {
+                    Map<String, String> h = entry.asHash();
+                    size = h.size();
+                    preview = h.entrySet().stream().limit(3)
+                            .map(kv -> kv.getKey() + ": " + kv.getValue())
+                            .reduce((a, b) -> a + ", " + b).orElse("{}");
+                    if (h.size() > 3) preview += ", ...";
+                }
+                case LIST -> {
+                    List<String> l = entry.asList();
+                    size = l.size();
+                    preview = "[" + l.stream().limit(3).reduce((a, b) -> a + ", " + b).orElse("") + (l.size() > 3 ? ", ..." : "") + "]";
+                }
+                case SET -> {
+                    Set<String> s = entry.asSet();
+                    size = s.size();
+                    preview = "{" + s.stream().limit(3).reduce((a, b) -> a + ", " + b).orElse("") + (s.size() > 3 ? ", ..." : "") + "}";
+                }
+            }
             meta.put("size", size);
+            meta.put("preview", preview);
 
             list.add(meta);
+        }
+        return list;
+    }
+
+    public List<Map<String, Object>> exportData() {
+        cleanExpiredKeys();
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (String k : map.keySet()) {
+            Map<String, Object> details = getKeyDetails(k);
+            if (details != null) {
+                list.add(details);
+            }
         }
         return list;
     }

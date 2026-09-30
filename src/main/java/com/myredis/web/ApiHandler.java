@@ -59,6 +59,12 @@ public class ApiHandler implements HttpHandler {
                 handleDeleteKey(exchange);
             } else if (path.equals("/api/exec") && "POST".equals(method)) {
                 handleExecCommand(exchange);
+            } else if (path.equals("/api/batch-delete") && "POST".equals(method)) {
+                handleBatchDelete(exchange);
+            } else if (path.equals("/api/export") && "GET".equals(method)) {
+                handleExport(exchange);
+            } else if (path.equals("/api/import") && "POST".equals(method)) {
+                handleImport(exchange);
             } else if (path.equals("/api/flush") && "POST".equals(method)) {
                 handleFlush(exchange);
             } else {
@@ -227,6 +233,80 @@ public class ApiHandler implements HttpHandler {
                 "type", resp.getType().name(),
                 "output", formattedOutput
         ));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleBatchDelete(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        List<String> keys = (List<String>) req.get("keys");
+        if (keys == null || keys.isEmpty()) {
+            sendJson(exchange, 400, Map.of("error", "No keys provided for deletion"));
+            return;
+        }
+        int deleted = storage.del(keys);
+        sendJson(exchange, 200, Map.of("success", true, "deletedCount", deleted));
+    }
+
+    private void handleExport(HttpExchange exchange) throws IOException {
+        List<Map<String, Object>> data = storage.exportData();
+        Map<String, Object> export = Map.of(
+                "exportedAt", System.currentTimeMillis(),
+                "totalKeys", data.size(),
+                "keys", data
+        );
+        sendJson(exchange, 200, export);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleImport(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> req = mapper.readValue(body, Map.class);
+        List<Map<String, Object>> keys = (List<Map<String, Object>>) req.get("keys");
+        if (keys == null) {
+            sendJson(exchange, 400, Map.of("error", "Invalid import format: missing 'keys' list"));
+            return;
+        }
+
+        int imported = 0;
+        for (Map<String, Object> item : keys) {
+            String key = (String) item.get("key");
+            String type = (String) item.getOrDefault("type", "string");
+            Object val = item.get("value");
+            Number ttl = (Number) item.get("ttl");
+            if (key != null && val != null) {
+                Long expireAt = (ttl != null && ttl.longValue() > 0) ? System.currentTimeMillis() + (ttl.longValue() * 1000L) : null;
+                switch (type.toLowerCase()) {
+                    case "string" -> storage.set(key, val.toString(), expireAt, false, false);
+                    case "hash" -> {
+                        Map<String, String> h = new HashMap<>();
+                        if (val instanceof Map<?, ?> m) {
+                            for (Map.Entry<?, ?> e : m.entrySet()) h.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+                        }
+                        storage.hset(key, h);
+                        if (expireAt != null) storage.pexpire(key, expireAt - System.currentTimeMillis());
+                    }
+                    case "list" -> {
+                        List<String> l = new ArrayList<>();
+                        if (val instanceof List<?> list) {
+                            for (Object o : list) l.add(String.valueOf(o));
+                        }
+                        if (!l.isEmpty()) storage.rpush(key, l);
+                        if (expireAt != null) storage.pexpire(key, expireAt - System.currentTimeMillis());
+                    }
+                    case "set" -> {
+                        List<String> s = new ArrayList<>();
+                        if (val instanceof List<?> set) {
+                            for (Object o : set) s.add(String.valueOf(o));
+                        }
+                        if (!s.isEmpty()) storage.sadd(key, s);
+                        if (expireAt != null) storage.pexpire(key, expireAt - System.currentTimeMillis());
+                    }
+                }
+                imported++;
+            }
+        }
+        sendJson(exchange, 200, Map.of("success", true, "importedCount", imported));
     }
 
     private void handleFlush(HttpExchange exchange) throws IOException {

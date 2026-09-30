@@ -3,307 +3,355 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Redis Java Cloud Console</title>
+    <title>Redis Studio - Database Console</title>
     <link rel="stylesheet" href="/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body>
-    <div class="app-container">
-        <!-- Sidebar / Navigation -->
-        <header class="navbar">
-            <div class="brand">
-                <div class="logo-icon">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                        <polyline points="2 17 12 22 22 17"></polyline>
-                        <polyline points="2 12 12 17 22 12"></polyline>
-                    </svg>
-                </div>
-                <div class="brand-text">
-                    <span class="brand-title">Redis<span class="highlight">Java</span></span>
-                    <span class="brand-sub">Cloud Console</span>
-                </div>
-                <div class="status-indicator">
-                    <span class="status-dot"></span>
-                    <span class="status-label" id="serverStatus">Online (6379)</span>
-                </div>
-            </div>
-
-            <nav class="nav-links">
-                <button class="nav-tab active" data-tab="explorer">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-                    Data Explorer
-                </button>
-                <button class="nav-tab" data-tab="terminal">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-                    Web CLI
-                </button>
-                <button class="nav-tab" data-tab="telemetry">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-                    Server Info
-                </button>
-            </nav>
-
-            <div class="nav-actions">
-                <div class="auto-refresh-toggle">
-                    <label class="switch">
-                        <input type="checkbox" id="autoRefreshToggle" checked>
-                        <span class="slider"></span>
-                    </label>
-                    <span class="toggle-label">Live Poll</span>
-                </div>
-                <button class="btn btn-secondary" id="refreshBtn" title="Refresh Now">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
-                </button>
-                <button class="btn btn-primary" id="openNewKeyModalBtn">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                    New Key
-                </button>
-            </div>
-        </header>
-
-        <!-- Stats Overview Cards -->
-        <section class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-header">
-                    <span class="stat-title">Total Keys</span>
-                    <span class="stat-icon keys-icon">🔑</span>
-                </div>
-                <div class="stat-value" id="statTotalKeys">-</div>
-                <div class="stat-sub" id="statKeysSub">db0 keyspace</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-header">
-                    <span class="stat-title">Memory Used</span>
-                    <span class="stat-icon mem-icon">💾</span>
-                </div>
-                <div class="stat-value" id="statMemory">-</div>
-                <div class="stat-sub" id="statMemorySub">heap utilization</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-header">
-                    <span class="stat-title">Total Commands</span>
-                    <span class="stat-icon cmd-icon">⚡</span>
-                </div>
-                <div class="stat-value" id="statCommands">-</div>
-                <div class="stat-sub" id="statCommandsSub">processed</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-header">
-                    <span class="stat-title">Connected Clients</span>
-                    <span class="stat-icon clients-icon">👥</span>
-                </div>
-                <div class="stat-value" id="statClients">-</div>
-                <div class="stat-sub" id="statClientsSub">TCP virtual threads</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-header">
-                    <span class="stat-title">Hit Rate</span>
-                    <span class="stat-icon hits-icon">🎯</span>
-                </div>
-                <div class="stat-value" id="statHitRate">-</div>
-                <div class="stat-sub" id="statHitsSub">hits / misses</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-header">
-                    <span class="stat-title">Uptime</span>
-                    <span class="stat-icon time-icon">⏱️</span>
-                </div>
-                <div class="stat-value" id="statUptime">-</div>
-                <div class="stat-sub">since launch</div>
-            </div>
-        </section>
-
-        <!-- Tab 1: Data Explorer -->
-        <main class="tab-pane active" id="pane-explorer">
-            <div class="panel">
-                <div class="panel-header">
-                    <div class="search-bar">
-                        <div class="search-input-wrapper">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                            <input type="text" id="keySearchInput" placeholder="Filter keys by pattern (e.g. user:* or *)">
-                        </div>
-                        <select id="typeFilterSelect" class="select-dropdown">
-                            <option value="ALL">All Types</option>
-                            <option value="string">String</option>
-                            <option value="hash">Hash</option>
-                            <option value="list">List</option>
-                            <option value="set">Set</option>
-                        </select>
+<body class="studio-theme">
+    <div class="studio-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <div class="logo-box">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                            <polyline points="2 17 12 22 22 17"></polyline>
+                            <polyline points="2 12 12 17 22 12"></polyline>
+                        </svg>
                     </div>
-
-                    <div class="panel-actions">
-                        <button class="btn btn-outline-danger" id="flushDbBtn">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                            Flush DB
-                        </button>
+                    <div class="brand-info">
+                        <span class="brand-title">Redis<span class="red-text">Studio</span></span>
+                        <span class="brand-sub">Enterprise In-Memory DB</span>
                     </div>
                 </div>
+            </div>
 
-                <div class="table-container">
-                    <table class="keys-table" id="keysTable">
-                        <thead>
-                            <tr>
-                                <th style="width: 38%;">Key Name</th>
-                                <th style="width: 14%;">Type</th>
-                                <th style="width: 14%;">Size / Length</th>
-                                <th style="width: 18%;">TTL</th>
-                                <th style="width: 16%; text-align: right;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="keysTableBody">
-                            <tr>
-                                <td colspan="5" class="empty-state">
-                                    <div class="empty-content">
-                                        <div class="spinner"></div>
-                                        <p>Loading keys from Redis...</p>
-                                    </div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+            <!-- Database connection info -->
+            <div class="db-selector">
+                <div class="db-badge">
+                    <span class="db-dot"></span>
+                    <span class="db-name">redis://localhost:6379</span>
+                </div>
+                <div class="db-pill">db0</div>
+            </div>
+
+            <!-- Views / Tables Navigation -->
+            <div class="sidebar-section">
+                <span class="section-label">DATA VIEWS</span>
+                <nav class="nav-tree">
+                    <button class="nav-item active" data-type-filter="ALL">
+                        <span class="nav-icon">📑</span>
+                        <span class="nav-text">All Records</span>
+                        <span class="nav-count" id="countAll">-</span>
+                    </button>
+                    <button class="nav-item" data-type-filter="string">
+                        <span class="nav-icon type-icon str">🔤</span>
+                        <span class="nav-text">Strings</span>
+                        <span class="nav-count" id="countStrings">-</span>
+                    </button>
+                    <button class="nav-item" data-type-filter="hash">
+                        <span class="nav-icon type-icon hsh">🗃️</span>
+                        <span class="nav-text">Hashes</span>
+                        <span class="nav-count" id="countHashes">-</span>
+                    </button>
+                    <button class="nav-item" data-type-filter="list">
+                        <span class="nav-icon type-icon lst">📋</span>
+                        <span class="nav-text">Lists</span>
+                        <span class="nav-count" id="countLists">-</span>
+                    </button>
+                    <button class="nav-item" data-type-filter="set">
+                        <span class="nav-icon type-icon st">🎯</span>
+                        <span class="nav-text">Sets</span>
+                        <span class="nav-count" id="countSets">-</span>
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Namespaces / Tree Folders -->
+            <div class="sidebar-section">
+                <div class="section-label-row">
+                    <span class="section-label">NAMESPACES</span>
+                    <span class="namespace-refresh" id="refreshNamespacesBtn" title="Scan namespaces">↻</span>
+                </div>
+                <div class="namespace-list" id="namespaceTreeList">
+                    <!-- Populated dynamically (e.g. user:, devops:, active:) -->
+                    <div class="tree-item empty">Scanning keys...</div>
                 </div>
             </div>
-        </main>
 
-        <!-- Tab 2: Web CLI Terminal -->
-        <main class="tab-pane" id="pane-terminal">
-            <div class="terminal-container">
-                <div class="terminal-header">
-                    <div class="terminal-dots">
-                        <span class="dot red"></span>
-                        <span class="dot yellow"></span>
-                        <span class="dot green"></span>
+            <!-- Management Tools -->
+            <div class="sidebar-section">
+                <span class="section-label">TOOLS & UTILITIES</span>
+                <nav class="nav-tree">
+                    <button class="nav-item" id="exportDataBtn">
+                        <span class="nav-icon">💾</span>
+                        <span class="nav-text">Export JSON</span>
+                    </button>
+                    <button class="nav-item" id="importDataBtn">
+                        <span class="nav-icon">📥</span>
+                        <span class="nav-text">Import JSON</span>
+                        <input type="file" id="importFileInput" accept=".json" style="display: none;">
+                    </button>
+                    <button class="nav-item danger" id="flushDbBtn">
+                        <span class="nav-icon">🗑️</span>
+                        <span class="nav-text">Flush Database</span>
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Sidebar Footer Stats -->
+            <div class="sidebar-footer">
+                <div class="server-telemetry-badge">
+                    <div class="telemetry-item">
+                        <span class="label">Memory</span>
+                        <span class="val" id="sbMemory">-</span>
                     </div>
-                    <span class="terminal-title">redis-cli @ 127.0.0.1:6379</span>
-                    <div class="terminal-shortcuts">
-                        <button class="badge-btn" onclick="sendTerminalCommand('PING')">PING</button>
-                        <button class="badge-btn" onclick="sendTerminalCommand('KEYS *')">KEYS *</button>
-                        <button class="badge-btn" onclick="sendTerminalCommand('DBSIZE')">DBSIZE</button>
-                        <button class="badge-btn" onclick="sendTerminalCommand('INFO')">INFO</button>
-                        <button class="badge-btn" onclick="clearTerminal()">Clear</button>
+                    <div class="telemetry-item">
+                        <span class="label">Ops/sec</span>
+                        <span class="val" id="sbCommands">-</span>
+                    </div>
+                    <div class="telemetry-item">
+                        <span class="label">Uptime</span>
+                        <span class="val" id="sbUptime">-</span>
                     </div>
                 </div>
-                <div class="terminal-output" id="terminalOutput">
-                    <div class="terminal-line banner">
-                        Connected to Redis (Java 25) Standalone on port 6379.
-                        Type commands like 'SET foo bar', 'GET foo', 'HSET user name Alice', etc.
+            </div>
+        </aside>
+
+        <!-- Main Studio Work Area -->
+        <div class="main-work-area">
+            <!-- Top App Bar -->
+            <header class="top-bar">
+                <div class="breadcrumb-container">
+                    <span class="bc-crumb">Databases</span>
+                    <span class="bc-sep">/</span>
+                    <span class="bc-crumb">db0</span>
+                    <span class="bc-sep">/</span>
+                    <span class="bc-crumb active" id="currentViewBreadcrumb">All Records</span>
+                </div>
+
+                <div class="top-bar-actions">
+                    <div class="live-pill">
+                        <label class="switch-sm">
+                            <input type="checkbox" id="autoPollCheck" checked>
+                            <span class="slider-sm"></span>
+                        </label>
+                        <span>Live Sync</span>
+                    </div>
+
+                    <button class="btn btn-secondary btn-sm" id="manualRefreshBtn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                        Refresh
+                    </button>
+
+                    <button class="btn btn-secondary btn-sm" id="toggleTerminalBtn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                        Terminal CLI
+                    </button>
+
+                    <button class="btn btn-primary btn-sm" id="openInsertModalBtn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        Insert Record
+                    </button>
+                </div>
+            </header>
+
+            <!-- Datasheet Toolbar -->
+            <div class="datasheet-toolbar">
+                <div class="search-box">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="text" id="filterSearchInput" placeholder="Filter by key name, prefix, or glob (e.g. user:*)...">
+                </div>
+
+                <div class="toolbar-filters">
+                    <select id="sortSelect" class="studio-select">
+                        <option value="key_asc">Sort: Key (A → Z)</option>
+                        <option value="key_desc">Sort: Key (Z → A)</option>
+                        <option value="size_desc">Sort: Size (High → Low)</option>
+                        <option value="ttl_asc">Sort: TTL (Expiring Soon)</option>
+                        <option value="created_desc">Sort: Recently Created</option>
+                    </select>
+
+                    <span class="record-counter" id="recordCounter">Showing 0 records</span>
+                </div>
+
+                <!-- Batch Selection Actions Bar (hidden by default) -->
+                <div class="batch-bar" id="batchActionBar">
+                    <span class="batch-count" id="batchCountText">0 selected</span>
+                    <button class="btn btn-outline-danger btn-sm" id="batchDeleteBtn">Delete Selected</button>
+                    <button class="btn btn-secondary btn-sm" id="batchCancelBtn">Deselect</button>
+                </div>
+            </div>
+
+            <!-- Datasheet Grid Table -->
+            <div class="grid-container">
+                <table class="datasheet-table" id="datasheetTable">
+                    <thead>
+                        <tr>
+                            <th class="col-checkbox"><input type="checkbox" id="selectAllCheckbox"></th>
+                            <th class="col-num">#</th>
+                            <th class="col-key">Key Identifier</th>
+                            <th class="col-type">Data Type</th>
+                            <th class="col-preview">Value Preview</th>
+                            <th class="col-size">Size / Length</th>
+                            <th class="col-ttl">Time-To-Live (TTL)</th>
+                            <th class="col-actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="datasheetBody">
+                        <tr>
+                            <td colspan="8" class="table-loading">
+                                <div class="loading-state">
+                                    <div class="studio-spinner"></div>
+                                    <span>Querying Redis database...</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Bottom Dockable Web CLI Drawer -->
+            <div class="terminal-drawer collapsed" id="terminalDrawer">
+                <div class="terminal-drawer-header">
+                    <div class="td-left">
+                        <span class="td-dot online"></span>
+                        <span class="td-title">Redis Interactive Terminal (Port 6379)</span>
+                    </div>
+                    <div class="td-shortcuts">
+                        <button class="chip" onclick="execCliShortcut('PING')">PING</button>
+                        <button class="chip" onclick="execCliShortcut('KEYS *')">KEYS *</button>
+                        <button class="chip" onclick="execCliShortcut('DBSIZE')">DBSIZE</button>
+                        <button class="chip" onclick="execCliShortcut('INFO')">INFO</button>
+                        <button class="chip" onclick="clearCliTerminal()">Clear</button>
+                    </div>
+                    <div class="td-controls">
+                        <button class="drawer-btn" id="drawerExpandBtn" title="Toggle size">🗖</button>
+                        <button class="drawer-btn" id="drawerCloseBtn" title="Close drawer">&times;</button>
                     </div>
                 </div>
-                <form class="terminal-input-bar" id="terminalForm">
-                    <span class="terminal-prompt">redis-cli&gt;</span>
-                    <input type="text" id="terminalInput" placeholder="Type a Redis command and hit Enter..." autocomplete="off" spellcheck="false">
-                    <button type="submit" class="btn btn-primary btn-sm">Run</button>
+
+                <div class="terminal-drawer-body" id="drawerOutput">
+                    <div class="term-line welcome">
+                        ⚡ Connected to Redis Server (Java 25) on 127.0.0.1:6379. Enter commands below.
+                    </div>
+                </div>
+
+                <form class="terminal-drawer-input-row" id="drawerForm">
+                    <span class="term-prompt">redis-cli&gt;</span>
+                    <input type="text" id="drawerInput" placeholder="Execute command (e.g. SET user:name 'Alice' EX 300)..." autocomplete="off" spellcheck="false">
+                    <button type="submit" class="btn btn-primary btn-sm">Execute</button>
                 </form>
             </div>
-        </main>
-
-        <!-- Tab 3: Server Info -->
-        <main class="tab-pane" id="pane-telemetry">
-            <div class="panel">
-                <div class="panel-header">
-                    <h2 class="section-title">Redis Server Information & Metrics</h2>
-                    <button class="btn btn-secondary btn-sm" id="copyInfoBtn">Copy INFO</button>
-                </div>
-                <pre class="code-block" id="rawInfoOutput">Loading INFO telemetry...</pre>
-            </div>
-        </main>
-    </div>
-
-    <!-- View / Edit Key Drawer Modal -->
-    <div class="modal-backdrop" id="keyDetailModal">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-header">
-                <div class="modal-title-group">
-                    <span class="type-badge" id="modalKeyType">STRING</span>
-                    <h3 class="modal-title" id="modalKeyName">key:name</h3>
-                </div>
-                <button class="modal-close" onclick="closeKeyModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="detail-meta-row">
-                    <div class="meta-item">
-                        <span class="meta-label">TTL</span>
-                        <span class="meta-val" id="modalKeyTtl">No Expiry (-1)</span>
-                    </div>
-                    <div class="meta-item">
-                        <span class="meta-label">Length / Size</span>
-                        <span class="meta-val" id="modalKeySize">-</span>
-                    </div>
-                </div>
-
-                <div class="form-group" style="margin-top: 1rem;">
-                    <label>Value Content</label>
-                    <div id="modalValueContainer" class="value-inspector">
-                        <!-- Populated dynamically (textarea or table or list) -->
-                    </div>
-                </div>
-
-                <div class="form-group" style="margin-top: 1rem;">
-                    <label for="modalTtlInput">Update Expiration (Seconds, 0 or leave empty for no expiry)</label>
-                    <input type="number" id="modalTtlInput" class="input-field" placeholder="e.g. 3600 for 1 hour">
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-outline-danger" id="modalDeleteKeyBtn">Delete Key</button>
-                <div class="modal-footer-right">
-                    <button class="btn btn-secondary" onclick="closeKeyModal()">Cancel</button>
-                    <button class="btn btn-primary" id="modalSaveKeyBtn">Save Changes</button>
-                </div>
-            </div>
         </div>
+
+        <!-- Right Side Record Inspector & Editor Drawer -->
+        <aside class="record-inspector" id="recordInspector">
+            <div class="inspector-header">
+                <div class="inspector-title-group">
+                    <span class="badge-type" id="inspTypeBadge">STRING</span>
+                    <h3 class="inspector-key-title" id="inspKeyTitle">key:name</h3>
+                </div>
+                <button class="close-inspector-btn" id="closeInspectorBtn">&times;</button>
+            </div>
+
+            <div class="inspector-body">
+                <div class="inspector-meta-card">
+                    <div class="meta-field">
+                        <span class="lbl">Storage Type</span>
+                        <span class="val" id="inspMetaType">String</span>
+                    </div>
+                    <div class="meta-field">
+                        <span class="lbl">Memory Size</span>
+                        <span class="val" id="inspMetaSize">0 bytes</span>
+                    </div>
+                    <div class="meta-field">
+                        <span class="lbl">TTL Expiry</span>
+                        <span class="val" id="inspMetaTtl">No Expiration (-1)</span>
+                    </div>
+                </div>
+
+                <!-- Value Editor Container -->
+                <div class="inspector-section">
+                    <div class="section-title-row">
+                        <label class="section-lbl">DATA CONTENT</label>
+                        <div class="content-tools" id="contentTools">
+                            <!-- e.g. Format JSON, Add Field -->
+                        </div>
+                    </div>
+                    <div id="inspectorContentHost" class="content-host">
+                        <!-- Populated based on type -->
+                    </div>
+                </div>
+
+                <!-- TTL Configuration -->
+                <div class="inspector-section">
+                    <label class="section-lbl">UPDATE EXPIRATION (TTL)</label>
+                    <div class="ttl-input-group">
+                        <input type="number" id="inspTtlSeconds" class="studio-input" placeholder="Seconds (0 or blank = persistent)">
+                        <button class="btn btn-secondary btn-sm" id="inspSetTtlBtn">Set TTL</button>
+                        <button class="btn btn-secondary btn-sm" id="inspPersistBtn">Persist</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="inspector-footer">
+                <button class="btn btn-outline-danger btn-sm" id="inspDeleteRecordBtn">Delete Key</button>
+                <div class="footer-actions">
+                    <button class="btn btn-secondary btn-sm" id="inspCancelBtn">Close</button>
+                    <button class="btn btn-primary btn-sm" id="inspSaveRecordBtn">Save Changes</button>
+                </div>
+            </div>
+        </aside>
     </div>
 
-    <!-- Create Key Modal -->
-    <div class="modal-backdrop" id="newKeyModal">
+    <!-- Insert Record Modal -->
+    <div class="modal-backdrop" id="insertModal">
         <div class="modal-dialog">
             <div class="modal-header">
-                <h3 class="modal-title">Create New Key</h3>
-                <button class="modal-close" onclick="closeNewKeyModal()">&times;</button>
+                <h3 class="modal-title">Insert New Redis Record</h3>
+                <button class="modal-close" onclick="closeInsertModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="form-group">
-                    <label for="newKeyName">Key Name *</label>
-                    <input type="text" id="newKeyName" class="input-field" placeholder="e.g. user:1001:profile">
+                <div class="studio-form-group">
+                    <label>Key Identifier *</label>
+                    <input type="text" id="insKey" class="studio-input" placeholder="e.g. user:1001:profile or session:abc">
+                    <small class="hint">Use colons (:) to create hierarchical namespaces automatically.</small>
                 </div>
 
-                <div class="form-group">
-                    <label for="newKeyType">Data Type</label>
-                    <select id="newKeyType" class="input-field">
-                        <option value="string">String (Text or JSON)</option>
-                        <option value="hash">Hash (Field-Value pairs)</option>
-                        <option value="list">List (Ordered elements)</option>
-                        <option value="set">Set (Unique items)</option>
+                <div class="studio-form-group">
+                    <label>Data Type</label>
+                    <select id="insType" class="studio-input">
+                        <option value="string">String (Text, Numbers, or JSON)</option>
+                        <option value="hash">Hash (Dictionary / Key-Value object)</option>
+                        <option value="list">List (Ordered array / queue)</option>
+                        <option value="set">Set (Collection of unique elements)</option>
                     </select>
                 </div>
 
-                <div class="form-group" id="newValueGroup">
-                    <label id="newValueLabel">Value *</label>
-                    <textarea id="newKeyValue" class="input-field text-area" rows="4" placeholder="Enter string value..."></textarea>
-                    <small class="helper-text" id="newKeyHelper">Plain string or JSON text</small>
+                <div class="studio-form-group" id="insValueGroup">
+                    <label id="insValueLabel">Value Content *</label>
+                    <textarea id="insValue" class="studio-input textarea" rows="4" placeholder="Enter string or JSON..."></textarea>
+                    <small class="hint" id="insValueHint">Raw text or JSON payload</small>
                 </div>
 
-                <div class="form-group">
-                    <label for="newKeyTtl">Time-To-Live (Seconds, optional)</label>
-                    <input type="number" id="newKeyTtl" class="input-field" placeholder="Leave empty for persistent key">
+                <div class="studio-form-group">
+                    <label>Expiration / TTL (Seconds, Optional)</label>
+                    <input type="number" id="insTtl" class="studio-input" placeholder="e.g. 3600 (Leave empty for persistent key)">
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeNewKeyModal()">Cancel</button>
-                <button class="btn btn-primary" id="saveNewKeySubmitBtn">Create Key</button>
+                <button class="btn btn-secondary" onclick="closeInsertModal()">Cancel</button>
+                <button class="btn btn-primary" id="insSubmitBtn">Save Record</button>
             </div>
         </div>
     </div>
 
-    <!-- Toast Notifications -->
-    <div id="toastContainer" class="toast-container"></div>
+    <!-- Notification Toast Container -->
+    <div id="toastContainer" class="toast-shelf"></div>
 
     <script src="/js/app.js"></script>
 </body>
